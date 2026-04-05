@@ -2,8 +2,8 @@ import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } from '.
 import { TILES } from './TileTypes.js'
 import { buildPalette } from './TileTypes.js'
 
-const POOL_SIZE = 100
-const BASE_SPAWN_RATE = 3 // ambient particles per second
+const POOL_SIZE = 150
+const BASE_SPAWN_RATE = 8 // ambient particles per second
 
 // Wind tendencies per element; blended by the world's element ratio
 const ELEMENT_WINDS = {
@@ -97,9 +97,12 @@ export default class ParticleEngine {
       // Fade envelope: ramp in over first 20% of life, ramp out over last 30%
       const t = p.life / p.maxLife // 1 = just born, 0 = dead
       let alpha = t < 0.3 ? t / 0.3 : t > 0.8 ? (1 - t) / 0.2 : 1
-      alpha *= 0.7
       // abs(sin) gives a pulsing glow that never zeroes out
-      if (p.flickerRate > 0) alpha *= 0.3 + 0.7 * Math.abs(Math.sin(Date.now() * p.flickerRate))
+      if (p.flickerRate > 0) {
+        alpha *= 0.4 + 0.6 * Math.abs(Math.sin(Date.now() * p.flickerRate))
+      } else {
+        alpha *= 0.85
+      }
 
       p.sprite.setPosition(p.x, p.y)
       p.sprite.setAlpha(Math.max(0, alpha))
@@ -167,43 +170,43 @@ export default class ParticleEngine {
 
     if (element === 'fire') {
       if (!underground) {
-        c.push({ key: 'ember', size: [1, 2.5], life: [2000, 4000], vx: [-5, 5], vy: [-20, -8], spawn: 'edge', depth: 11, flickerRate: 0.006 })
-        c.push({ key: 'smoke', size: [2, 4], life: [3000, 6000], vx: [-8, 8], vy: [-15, -5], spawn: 'edge', depth: 5 })
-        if (!night) c.push({ key: 'shimmer', size: [3, 6], life: [1500, 3000], vx: [-2, 2], vy: [-3, 3], spawn: 'area', depth: 5, flickerRate: 0.01 })
+        c.push({ key: 'ember', size: [2, 4], life: [2000, 4000], vx: [-5, 5], vy: [-20, -8], spawn: 'edge', depth: 11, flickerRate: 0.006 })
+        c.push({ key: 'smoke', size: [4, 8], life: [3000, 6000], vx: [-8, 8], vy: [-15, -5], spawn: 'edge', depth: 5 })
+        if (!night) c.push({ key: 'shimmer', size: [6, 12], life: [1500, 3000], vx: [-2, 2], vy: [-3, 3], spawn: 'area', depth: 5, flickerRate: 0.01 })
       } else {
-        c.push({ key: 'magmaSpark', size: [1, 2], life: [800, 1500], vx: [-15, 15], vy: [-30, -10], spawn: 'tile', tiles: [TILES.LAVA, TILES.MAGMA_ROCK], depth: 11, flickerRate: 0.008 })
-        c.push({ key: 'ember', size: [1, 2], life: [1500, 3000], vx: [-5, 5], vy: [-12, -4], spawn: 'area', depth: 6, flickerRate: 0.005 })
+        c.push({ key: 'magmaSpark', size: [2, 3], life: [800, 1500], vx: [-15, 15], vy: [-30, -10], spawn: 'tile', tiles: [TILES.LAVA, TILES.MAGMA_ROCK], depth: 11, flickerRate: 0.008 })
+        c.push({ key: 'ember', size: [2, 3.5], life: [1500, 3000], vx: [-5, 5], vy: [-12, -4], spawn: 'area', depth: 6, flickerRate: 0.005 })
       }
     }
 
     if (element === 'water') {
       if (!underground) {
-        c.push({ key: 'spray', size: [1, 2.5], life: [1500, 3000], vx: [-10, 10], vy: [-8, 2], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
-        c.push({ key: 'foam', size: [1.5, 3], life: [2000, 4000], vx: [-12, 12], vy: [-3, 3], spawn: 'edge', depth: 5 })
+        c.push({ key: 'spray', size: [2, 4], life: [1500, 3000], vx: [-10, 10], vy: [-8, 2], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
+        c.push({ key: 'foam', size: [3, 5], life: [2000, 4000], vx: [-12, 12], vy: [-3, 3], spawn: 'edge', depth: 5 })
       } else {
-        c.push({ key: 'drip', size: [1, 1.5], life: [1000, 2000], vx: [-1, 1], vy: [15, 30], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
-        c.push({ key: 'spray', size: [1, 2], life: [1500, 2500], vx: [-5, 5], vy: [-3, 3], spawn: 'area', depth: 5 })
+        c.push({ key: 'drip', size: [1.5, 2.5], life: [1000, 2000], vx: [-1, 1], vy: [15, 30], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
+        c.push({ key: 'spray', size: [2, 3.5], life: [1500, 2500], vx: [-5, 5], vy: [-3, 3], spawn: 'area', depth: 5 })
       }
     }
 
     if (element === 'air') {
       if (!underground) {
-        c.push({ key: 'leaf', size: [1.5, 3], life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6 })
-        c.push({ key: 'cloudWisp', size: [3, 6], life: [4000, 7000], vx: [5, 15], vy: [-2, 2], spawn: 'edge', depth: 5 })
+        c.push({ key: 'leaf', size: [3, 5], life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6 })
+        c.push({ key: 'cloudWisp', size: [6, 12], life: [4000, 7000], vx: [5, 15], vy: [-2, 2], spawn: 'edge', depth: 5 })
       } else {
-        c.push({ key: 'dustMote', size: [1, 2], life: [3000, 5000], vx: [-3, 3], vy: [-2, 2], spawn: 'area', depth: 5 })
+        c.push({ key: 'dustMote', size: [2, 3.5], life: [3000, 5000], vx: [-3, 3], vy: [-2, 2], spawn: 'area', depth: 5 })
       }
     }
 
     if (element === 'earth') {
       if (!underground) {
-        c.push({ key: 'pollen', size: [1, 2], life: [3000, 5000], vx: [-5, 8], vy: [-10, -3], spawn: 'area', depth: 6 })
-        c.push({ key: 'dust', size: [1.5, 3], life: [2000, 4000], vx: [-8, 8], vy: [-3, 3], spawn: 'edge', depth: 5 })
-        if (night) c.push({ key: 'firefly', size: [1, 2], life: [4000, 8000], vx: [-5, 5], vy: [-5, 5], spawn: 'area', depth: 11, flickerRate: 0.004 })
+        c.push({ key: 'pollen', size: [2, 3.5], life: [3000, 5000], vx: [-5, 8], vy: [-10, -3], spawn: 'area', depth: 6 })
+        c.push({ key: 'dust', size: [3, 5], life: [2000, 4000], vx: [-8, 8], vy: [-3, 3], spawn: 'edge', depth: 5 })
+        if (night) c.push({ key: 'firefly', size: [2, 3.5], life: [4000, 8000], vx: [-5, 5], vy: [-5, 5], spawn: 'area', depth: 11, flickerRate: 0.004 })
       } else {
-        c.push({ key: 'spore', size: [1, 2], life: [2500, 4000], vx: [-3, 3], vy: [-8, -2], spawn: 'tile', tiles: [TILES.MUSHROOM], depth: 6 })
-        c.push({ key: 'dustMote', size: [1, 2], life: [3000, 5000], vx: [-2, 2], vy: [-2, 2], spawn: 'area', depth: 5 })
-        if (night) c.push({ key: 'firefly', size: [1, 1.5], life: [3000, 6000], vx: [-4, 4], vy: [-4, 4], spawn: 'area', depth: 11, flickerRate: 0.003 })
+        c.push({ key: 'spore', size: [2, 3.5], life: [2500, 4000], vx: [-3, 3], vy: [-8, -2], spawn: 'tile', tiles: [TILES.MUSHROOM], depth: 6 })
+        c.push({ key: 'dustMote', size: [2, 3.5], life: [3000, 5000], vx: [-2, 2], vy: [-2, 2], spawn: 'area', depth: 5 })
+        if (night) c.push({ key: 'firefly', size: [2, 3], life: [3000, 6000], vx: [-4, 4], vy: [-4, 4], spawn: 'area', depth: 11, flickerRate: 0.003 })
       }
     }
 
@@ -259,7 +262,7 @@ export default class ParticleEngine {
     p.flickerRate = def.flickerRate || 0
 
     p.sprite.setRadius(size)
-    p.sprite.setFillStyle(colour, 0)
+    p.sprite.setFillStyle(colour)
     p.sprite.setPosition(x, y)
     p.sprite.setDepth(def.depth || 6)
     p.sprite.setVisible(true)
