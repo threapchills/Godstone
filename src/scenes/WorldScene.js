@@ -11,6 +11,7 @@ import PortalHenge from '../world/PortalHenge.js'
 import ParallaxSky from '../ui/ParallaxSky.js'
 import CritterManager from '../world/Critters.js'
 import AmbienceEngine from '../sound/AmbienceEngine.js'
+import ParticleEngine from '../world/ParticleEngine.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -165,6 +166,9 @@ export default class WorldScene extends Phaser.Scene {
     // Ambient critters
     this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
 
+    // Cosmetic ambient particles (embers, leaves, mist, fireflies, etc.)
+    this.particles = new ParticleEngine(this, params, this.worldGrid, worldData.surfaceHeights)
+
     // HUD
     this.createHUD(params)
 
@@ -175,6 +179,9 @@ export default class WorldScene extends Phaser.Scene {
       const dot = this.minimap.addTabletMarker(t)
       if (dot) t._minimapDot = dot
     })
+
+    // Clean up resources when scene is stopped or restarted
+    this.events.once('shutdown', this.shutdown, this)
 
     // World ready
     this.worldReady = true
@@ -356,6 +363,9 @@ export default class WorldScene extends Phaser.Scene {
     // Critter AI
     if (this.critters) this.critters.update(delta)
 
+    // Ambient particles
+    if (this.particles) this.particles.update(delta, this.god.sprite, this.dayTime)
+
     // Minimap
     if (this.minimap) this.minimap.update(this.god.sprite)
 
@@ -375,6 +385,7 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   shutdown() {
+    if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
   }
 
