@@ -1,32 +1,38 @@
 import Phaser from 'phaser'
-import { TILE_SIZE, GOD_SPEED, GOD_JUMP, GRAVITY } from '../core/Constants.js'
-import { TILES, LIQUID_TILES } from '../world/TileTypes.js'
+import { TILE_SIZE, GOD_SPEED, GOD_JUMP, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
+import { TILES, LIQUID_TILES, SOLID_TILES } from '../world/TileTypes.js'
+import { createGodTexture, GOD_W, GOD_H } from './GodRenderer.js'
 
-// The god entity: a demi-human deity that traverses the world.
-// Phase 1: basic platformer movement (walk, jump, fly hint).
-// God appearance will be procedurally generated later; for now, a coloured sprite.
+const FLAP_IMPULSE = -220       // upward burst per space press
+const FLAP_COOLDOWN = 180       // ms between flaps
+const DIG_RATE = 100            // ms between dig ticks when held
+const AIR_CONTROL = 0.85        // horizontal speed multiplier in air
+const COYOTE_TIME = 80          // ms of grace after walking off edge
+
 export default class God {
   constructor(scene, x, y, params) {
     this.scene = scene
     this.params = params
 
-    // Generate a simple god sprite based on element colours
     this.createSprite(scene, x, y, params)
 
-    // Physics
+    // Physics — hitbox smaller than visual for forgiving collisions
     scene.physics.add.existing(this.sprite)
     this.sprite.body.setGravityY(GRAVITY)
-    this.sprite.body.setSize(12, 22)
-    this.sprite.body.setOffset(2, 2)
+    this.sprite.body.setSize(14, 24)
+    this.sprite.body.setOffset(5, 8)
     this.sprite.body.setCollideWorldBounds(false)
     this.sprite.body.setBounce(0)
     this.sprite.body.setMaxVelocityY(500)
 
     // State
     this.isInLiquid = false
-    this.canFly = false
     this.facingRight = true
-    this.tablets = [] // collected tablets
+    this.tablets = []
+    this.lastFlapTime = 0
+    this.lastDigTime = 0
+    this.coyoteTimer = 0
+    this.isFlying = false
 
     // Input
     this.cursors = scene.input.keyboard.createCursorKeys()
@@ -40,74 +46,7 @@ export default class God {
   }
 
   createSprite(scene, x, y, params) {
-    const width = 16
-    const height = 24
-    const key = 'god-sprite'
-
-    if (!scene.textures.exists(key)) {
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-
-      const elementColours = {
-        fire: { body: '#e85a20', dark: '#a03a10', glow: '#ff8844' },
-        water: { body: '#2888aa', dark: '#1a6688', glow: '#44ccff' },
-        air: { body: '#b0c0d0', dark: '#8899aa', glow: '#ddeeff' },
-        earth: { body: '#6a8a3a', dark: '#4a6a2a', glow: '#aacc66' },
-      }
-      const c1 = elementColours[params.element1] || elementColours.fire
-      const c2 = elementColours[params.element2] || elementColours.water
-
-      // Aura glow behind the god
-      ctx.fillStyle = c1.glow
-      ctx.globalAlpha = 0.3
-      ctx.fillRect(3, 1, 10, 20)
-      ctx.globalAlpha = 1
-
-      // Head (round-ish)
-      ctx.fillStyle = c1.body
-      ctx.fillRect(5, 1, 6, 5)
-      ctx.fillRect(4, 2, 8, 3)
-
-      // Eyes
-      ctx.fillStyle = c2.glow
-      ctx.fillRect(6, 3, 1, 1)
-      ctx.fillRect(9, 3, 1, 1)
-
-      // Crown / divine mark
-      ctx.fillStyle = '#ffd700'
-      ctx.fillRect(6, 0, 1, 2)
-      ctx.fillRect(8, 0, 1, 1)
-      ctx.fillRect(10, 0, 1, 2)
-
-      // Torso
-      ctx.fillStyle = c1.dark
-      ctx.fillRect(4, 6, 8, 8)
-      ctx.fillStyle = c1.body
-      ctx.fillRect(5, 7, 6, 6)
-
-      // Belt / sash (accent colour)
-      ctx.fillStyle = c2.body
-      ctx.fillRect(4, 12, 8, 1)
-
-      // Arms
-      ctx.fillStyle = c1.body
-      ctx.fillRect(2, 7, 2, 5)
-      ctx.fillRect(12, 7, 2, 5)
-
-      // Legs
-      ctx.fillStyle = c1.dark
-      ctx.fillRect(5, 14, 3, 8)
-      ctx.fillRect(9, 14, 3, 8)
-      // Feet
-      ctx.fillStyle = c2.dark || c1.dark
-      ctx.fillRect(4, 21, 4, 3)
-      ctx.fillRect(9, 21, 4, 3)
-
-      scene.textures.addCanvas(key, canvas)
-    }
-
+    const { key } = createGodTexture(scene, params)
     this.sprite = scene.add.sprite(x, y, key)
     this.sprite.setOrigin(0.5, 1)
     this.sprite.setDepth(10)
@@ -117,63 +56,150 @@ export default class God {
     const body = this.sprite.body
     const onGround = body.blocked.down
 
-    // Check if standing in liquid
+    // Coyote time: brief grace period after leaving ground
+    if (onGround) {
+      this.coyoteTimer = COYOTE_TIME
+      this.isFlying = false
+    } else {
+      this.coyoteTimer = Math.max(0, this.coyoteTimer - 16)
+    }
+
     this.checkLiquid(worldGrid)
 
-    // Horizontal movement
+    // -- Horizontal movement --
     const speed = this.isInLiquid ? GOD_SPEED * 0.6 : GOD_SPEED
+    const effectiveSpeed = onGround ? speed : speed * AIR_CONTROL
     let moving = false
-    if (this.cursors.left.isDown || this.wasd.left.isDown) {
-      body.setVelocityX(-speed)
+    let movingLeft = this.cursors.left.isDown || this.wasd.left.isDown
+    let movingRight = this.cursors.right.isDown || this.wasd.right.isDown
+
+    if (movingLeft) {
+      body.setVelocityX(-effectiveSpeed)
       moving = true
-      if (this.facingRight) {
-        this.sprite.setFlipX(true)
-        this.facingRight = false
-      }
-    } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
-      body.setVelocityX(speed)
+      if (this.facingRight) { this.sprite.setFlipX(true); this.facingRight = false }
+    } else if (movingRight) {
+      body.setVelocityX(effectiveSpeed)
       moving = true
-      if (!this.facingRight) {
-        this.sprite.setFlipX(false)
-        this.facingRight = true
-      }
+      if (!this.facingRight) { this.sprite.setFlipX(false); this.facingRight = true }
     } else {
-      body.setVelocityX(0)
+      // Friction: decelerate smoothly instead of stopping dead
+      body.setVelocityX(body.velocity.x * (onGround ? 0.7 : 0.92))
     }
 
-    // Walking bob animation
-    if (moving && onGround && time) {
-      this.sprite.rotation = Math.sin(time * 0.012) * 0.06
-    } else {
-      this.sprite.rotation *= 0.85 // ease back to upright
-    }
-
-    // Jumping / swimming upward
+    // -- Jump (up arrow / W) --
+    const wantsJump = this.cursors.up.isDown || this.wasd.up.isDown
     if (this.isInLiquid) {
       body.setGravityY(GRAVITY * 0.3)
-      if (this.cursors.up.isDown || this.wasd.up.isDown || this.spaceKey.isDown) {
-        body.setVelocityY(-GOD_SPEED * 0.8)
-      }
-      if (this.cursors.down.isDown || this.wasd.down.isDown) {
-        body.setVelocityY(GOD_SPEED * 0.6)
-      }
+      if (wantsJump) body.setVelocityY(-GOD_SPEED * 0.8)
+      if (this.cursors.down.isDown || this.wasd.down.isDown) body.setVelocityY(GOD_SPEED * 0.6)
     } else {
       body.setGravityY(GRAVITY)
-      if ((this.cursors.up.isDown || this.wasd.up.isDown || this.spaceKey.isDown) && onGround) {
+      if (wantsJump && this.coyoteTimer > 0) {
         body.setVelocityY(GOD_JUMP)
+        this.coyoteTimer = 0
       }
     }
 
-    // Dig downward (hold down while on ground)
-    if ((this.cursors.down.isDown || this.wasd.down.isDown) && onGround && !this.isInLiquid) {
-      this.dig(worldGrid)
+    // -- Fly / flap (space) --
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isInLiquid) {
+      if (time - this.lastFlapTime > FLAP_COOLDOWN) {
+        // Flap: upward impulse that works anywhere, even underground
+        const currentVy = body.velocity.y
+        body.setVelocityY(Math.min(currentVy, 0) + FLAP_IMPULSE)
+        this.lastFlapTime = time
+        this.isFlying = true
+        this.spawnFlapEffect()
+      }
+    }
+    // Holding space gives a gentle sustained lift (slower than flap bursts)
+    if (this.spaceKey.isDown && !this.isInLiquid && !onGround) {
+      body.setGravityY(GRAVITY * 0.4) // reduced gravity while holding space
+    }
+
+    // -- Directional digging --
+    // Down digs downward or in movement direction
+    const wantsDigDown = this.cursors.down.isDown || this.wasd.down.isDown
+    if (wantsDigDown && time - this.lastDigTime > DIG_RATE) {
+      this.lastDigTime = time
+      if (movingLeft) {
+        this.digAt(worldGrid, -1, 0)
+        this.digAt(worldGrid, -1, 1)
+      } else if (movingRight) {
+        this.digAt(worldGrid, 1, 0)
+        this.digAt(worldGrid, 1, 1)
+      } else {
+        this.digAt(worldGrid, 0, 1)
+        this.digAt(worldGrid, 0, 2)
+      }
+    }
+    // Up digs upward (critical for escaping underground)
+    if (wantsJump && time - this.lastDigTime > DIG_RATE) {
+      this.lastDigTime = time
+      this.digAt(worldGrid, 0, -1)
+      this.digAt(worldGrid, 0, -2)
+      if (movingLeft) this.digAt(worldGrid, -1, -1)
+      if (movingRight) this.digAt(worldGrid, 1, -1)
+    }
+
+    // Auto-dig when walking into walls
+    if (moving && body.blocked.left) this.digAt(worldGrid, -1, 0)
+    if (moving && body.blocked.right) this.digAt(worldGrid, 1, 0)
+
+    // Auto-dig upward when hitting ceiling (prevents getting stuck underground)
+    if (body.blocked.up) {
+      this.digAt(worldGrid, 0, -1)
+      this.digAt(worldGrid, 0, -2)
+    }
+
+    // When flying upward, carve a path through terrain
+    if (this.isFlying && body.velocity.y < 0) {
+      this.digAt(worldGrid, 0, -1)
+      this.digAt(worldGrid, 0, -2)
+    }
+
+    // Rescue: if completely boxed in (stuck), clear surrounding tiles
+    if (body.blocked.left && body.blocked.right && body.blocked.down && body.blocked.up) {
+      this.digAt(worldGrid, 0, -1)
+      this.digAt(worldGrid, 0, -2)
+      this.digAt(worldGrid, -1, 0)
+      this.digAt(worldGrid, 1, 0)
+      this.digAt(worldGrid, 0, 1)
+    }
+
+    // -- Animation --
+    if (time) {
+      if (this.isFlying && !onGround) {
+        // Gentle float wobble while flying
+        this.sprite.rotation = Math.sin(time * 0.008) * 0.1
+      } else if (moving && onGround) {
+        this.sprite.rotation = Math.sin(time * 0.012) * 0.06
+      } else {
+        this.sprite.rotation *= 0.85
+      }
+    }
+  }
+
+  spawnFlapEffect() {
+    // Small burst of air particles below the god
+    for (let i = 0; i < 4; i++) {
+      const px = this.sprite.x + (Math.random() - 0.5) * 10
+      const py = this.sprite.y + 2
+      const particle = this.scene.add.circle(px, py, 1.5, 0xcccccc, 0.5).setDepth(9)
+      this.scene.tweens.add({
+        targets: particle,
+        y: py + 10 + Math.random() * 8,
+        x: px + (Math.random() - 0.5) * 12,
+        alpha: 0,
+        scale: 0.3,
+        duration: 300 + Math.random() * 200,
+        onComplete: () => particle.destroy(),
+      })
     }
   }
 
   checkLiquid(worldGrid) {
     if (!worldGrid) { this.isInLiquid = false; return }
-    // Check the tile at the god's feet
-    const tileX = Math.floor(this.sprite.x / TILE_SIZE)
+    const tileX = Math.floor(this.sprite.x / TILE_SIZE) % worldGrid.width
     const tileY = Math.floor((this.sprite.y - TILE_SIZE) / TILE_SIZE)
     if (tileX < 0 || tileX >= worldGrid.width || tileY < 0 || tileY >= worldGrid.height) {
       this.isInLiquid = false
@@ -183,43 +209,48 @@ export default class God {
     this.isInLiquid = LIQUID_TILES.has(tile)
   }
 
-  dig(worldGrid) {
+  // Dig relative to the god's position: dx/dy in tile offsets
+  digAt(worldGrid, dx, dy) {
     if (!worldGrid) return
-    // Remove the tile directly below the god's feet
-    const tileX = Math.floor(this.sprite.x / TILE_SIZE)
-    const tileY = Math.floor(this.sprite.y / TILE_SIZE)
-    if (tileX < 0 || tileX >= worldGrid.width || tileY < 0 || tileY >= worldGrid.height) return
+    const baseTileX = Math.floor(this.sprite.x / TILE_SIZE)
+    const baseTileY = Math.floor((this.sprite.y - TILE_SIZE / 2) / TILE_SIZE)
+    const tileX = ((baseTileX + dx) % worldGrid.width + worldGrid.width) % worldGrid.width
+    const tileY = baseTileY + dy
+    if (tileY < 0 || tileY >= worldGrid.height) return
 
     const idx = tileY * worldGrid.width + tileX
     const tile = worldGrid.grid[idx]
-    // Can't dig bedrock
     if (tile === TILES.BEDROCK || tile === TILES.AIR) return
     if (LIQUID_TILES.has(tile)) return
 
     worldGrid.grid[idx] = TILES.AIR
-    // Update the tilemap
     if (worldGrid.layer) {
-      worldGrid.layer.putTileAt(-1, tileX, tileY)
+      const pad = worldGrid.padOffset || 0
+      worldGrid.layer.putTileAt(-1, tileX + pad, tileY)
+      // Sync mirrored padding columns so the wrap seam stays consistent
+      if (tileX < pad) {
+        worldGrid.layer.putTileAt(-1, tileX + pad + worldGrid.width, tileY)
+      }
+      if (tileX >= worldGrid.width - pad) {
+        worldGrid.layer.putTileAt(-1, tileX + pad - worldGrid.width, tileY)
+      }
     }
-    // Dig debris particles
     this.spawnDebris(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2)
   }
 
   spawnDebris(x, y) {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       const particle = this.scene.add.circle(
         x + (Math.random() - 0.5) * TILE_SIZE,
         y + (Math.random() - 0.5) * TILE_SIZE,
-        1 + Math.random(),
-        0x8a7a5a, 1
+        1 + Math.random(), 0x8a7a5a, 1
       ).setDepth(11)
-
       this.scene.tweens.add({
         targets: particle,
-        x: particle.x + (Math.random() - 0.5) * 20,
-        y: particle.y - Math.random() * 15,
+        x: particle.x + (Math.random() - 0.5) * 16,
+        y: particle.y - Math.random() * 12,
         alpha: 0,
-        duration: 400 + Math.random() * 200,
+        duration: 300 + Math.random() * 150,
         onComplete: () => particle.destroy(),
       })
     }

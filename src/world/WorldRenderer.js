@@ -1,5 +1,8 @@
-import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE } from '../core/Constants.js'
+import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH } from '../core/Constants.js'
 import { TILES, buildPalette } from './TileTypes.js'
+
+// Padding columns on each side for seamless horizontal wrapping
+export const WRAP_PAD = Math.ceil(GAME_WIDTH / TILE_SIZE / 2) + 8
 
 // Generate a tileset texture at runtime from the element palette.
 // Each tile type gets one TILE_SIZE x TILE_SIZE coloured square with subtle variation.
@@ -47,17 +50,20 @@ export function createTilesetTexture(scene, params) {
 }
 
 // Build a Phaser tilemap from the world grid data.
-// Returns { map, layer } for further manipulation.
+// Adds WRAP_PAD columns on each side so the camera sees mirrored
+// terrain at the horizontal edges, making the world loop seamlessly.
 export function createTilemap(scene, worldData) {
   const { grid } = worldData
+  const totalWidth = WORLD_WIDTH + 2 * WRAP_PAD
 
-  // Convert flat Uint8Array to 2D array for Phaser
   const data = []
   for (let y = 0; y < WORLD_HEIGHT; y++) {
     const row = []
-    for (let x = 0; x < WORLD_WIDTH; x++) {
-      const tile = grid[y * WORLD_WIDTH + x]
-      // Phaser tilemap uses -1 for empty tiles
+    for (let x = 0; x < totalWidth; x++) {
+      // Map padded column back to the logical world column
+      let wx = x - WRAP_PAD
+      wx = ((wx % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
+      const tile = grid[y * WORLD_WIDTH + wx]
       row.push(tile === TILES.AIR ? -1 : tile)
     }
     data.push(row)
@@ -70,7 +76,8 @@ export function createTilemap(scene, worldData) {
   })
 
   const tileset = map.addTilesetImage('worldTiles', 'worldTiles', TILE_SIZE, TILE_SIZE, 0, 0)
-  const layer = map.createLayer(0, tileset, 0, 0)
+  // Offset the layer so padded column WRAP_PAD aligns with world x=0
+  const layer = map.createLayer(0, tileset, -WRAP_PAD * TILE_SIZE, 0)
 
   return { map, layer }
 }

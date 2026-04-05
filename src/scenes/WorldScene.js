@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from '../core/Constants.js'
 import { generateWorld, findFlatSurface, findTabletLocation } from '../world/WorldGenerator.js'
-import { createTilesetTexture, createTilemap, setupCollision } from '../world/WorldRenderer.js'
+import { createTilesetTexture, createTilemap, setupCollision, WRAP_PAD } from '../world/WorldRenderer.js'
 import { buildPalette } from '../world/TileTypes.js'
 import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
@@ -10,6 +10,7 @@ import Minimap from '../ui/Minimap.js'
 import PortalHenge from '../world/PortalHenge.js'
 import ParallaxSky from '../ui/ParallaxSky.js'
 import CritterManager from '../world/Critters.js'
+import AmbienceEngine from '../sound/AmbienceEngine.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -65,6 +66,7 @@ export default class WorldScene extends Phaser.Scene {
       width: WORLD_WIDTH,
       height: WORLD_HEIGHT,
       layer: layer,
+      padOffset: WRAP_PAD,
     }
 
     // Seeded RNG for entity placement
@@ -143,8 +145,11 @@ export default class WorldScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.god.sprite, true, 0.1, 0.1)
     this.cameras.main.setDeadzone(100, 50)
 
-    // World bounds for physics
-    this.physics.world.setBounds(0, 0, WORLD_WIDTH * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE)
+    // World bounds for physics (extended to cover wrap padding so collisions work at edges)
+    this.physics.world.setBounds(
+      -WRAP_PAD * TILE_SIZE, 0,
+      (WORLD_WIDTH + 2 * WRAP_PAD) * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE
+    )
 
     // Day/night cycle overlay
     this.dayNightOverlay = this.add.rectangle(
@@ -173,6 +178,14 @@ export default class WorldScene extends Phaser.Scene {
 
     // World ready
     this.worldReady = true
+
+    // Ambient sound engine; init requires user gesture so we defer
+    // until the first keypress/click which will have already occurred
+    // (element selection on creation screen counts).
+    this.ambience = new AmbienceEngine()
+    this.ambience.init().then(() => {
+      this.ambience.setWorld(params)
+    })
   }
 
   createHUD(params) {
@@ -353,6 +366,16 @@ export default class WorldScene extends Phaser.Scene {
 
     const depthPercent = Math.floor((tileY / WORLD_HEIGHT) * 100)
     this.depthText.setText(`Depth: ${depthPercent}%`)
+
+    // Drive ambient sound from world state
+    if (this.ambience?.initialized) {
+      this.ambience.setTimeOfDay(this.dayTime)
+      this.ambience.setDepth(tileY / WORLD_HEIGHT)
+    }
+  }
+
+  shutdown() {
+    if (this.ambience) { this.ambience.destroy(); this.ambience = null }
   }
 
   respawnGod() {

@@ -144,7 +144,7 @@ export default class CreationScene extends Phaser.Scene {
     this.updateCreateButton()
 
     // Instructions
-    this.add.text(cx, 520, 'WASD or arrows to move  |  Space to jump  |  Down to dig', {
+    this.add.text(cx, 520, 'WASD or arrows to move  |  Up to jump  |  Space to fly  |  Down to dig', {
       fontFamily: 'Georgia, serif',
       fontSize: '11px',
       color: '#444444',
