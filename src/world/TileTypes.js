@@ -16,6 +16,12 @@ export const TILES = {
   DEEP_WATER: 13,
   MAGMA_ROCK: 14,
   CLOUD: 15,
+  // Vegetation (non-solid, decorative)
+  TREE_TRUNK: 16,
+  TREE_LEAVES: 17,
+  BUSH: 18,
+  TALL_GRASS: 19,
+  MUSHROOM: 20,
   // Markers (non-terrain)
   VILLAGE_MARKER: 50,
   TABLET_MARKER: 51,
@@ -113,6 +119,11 @@ export function buildPalette(element1, element2, ratio) {
     [TILES.DEEP_WATER]: blendColour(0x0a2a4a, 0x0a1a3a, t),
     [TILES.MAGMA_ROCK]: blendColour(0x4a1a0a, 0x2a0a00, t),
     [TILES.CLOUD]: 0xc8d8e8,
+    [TILES.TREE_TRUNK]: blendColour(0x5a3a1a, 0x4a2a0a, t),
+    [TILES.TREE_LEAVES]: blendColour(c2.surface, c1.surface, t) | 0x002000, // greener than surface
+    [TILES.BUSH]: blendColour(0x3a6a2a, 0x2a5a1a, t),
+    [TILES.TALL_GRASS]: blendColour(c2.surface, c1.surface, t) | 0x001000,
+    [TILES.MUSHROOM]: blendColour(0xaa6644, 0x886644, t),
     [TILES.VILLAGE_MARKER]: 0xdaa520, // gold
     [TILES.TABLET_MARKER]: 0x00ffaa, // bright teal glow
     skyColour: blendColour(c2.sky, c1.sky, t),

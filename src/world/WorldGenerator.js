@@ -196,6 +196,10 @@ export function generateWorld(params) {
     }
   }
 
+  // -- Pass 5: surface vegetation --
+  // barrenFertile controls density: fertile = more plants
+  addVegetation(grid, surfaceHeights, barrenFertile, noise2D_c, rng)
+
   return { grid, surfaceHeights }
 }
 
@@ -266,13 +270,95 @@ function addFloatingIslands(grid, noise2D, surfaceHeights, airWeight, rng) {
   }
 }
 
+// Place trees, bushes, grass on the surface based on fertility
+function addVegetation(grid, surfaceHeights, fertility, noise2D, rng) {
+  const idx = (x, y) => y * WORLD_WIDTH + x
+  // Higher fertility = denser vegetation
+  const treeChance = 0.02 + fertility * 0.06
+  const bushChance = 0.03 + fertility * 0.08
+  const grassChance = 0.05 + fertility * 0.15
+
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    const surfaceY = Math.floor(surfaceHeights[x])
+    if (surfaceY <= 1 || surfaceY >= WORLD_HEIGHT - 1) continue
+    // Only place on solid surface tiles
+    const tile = grid[idx(x, surfaceY)]
+    if (tile !== TILES.SURFACE && tile !== TILES.SAND) continue
+    // Skip if there's no air above
+    if (surfaceY - 1 < 0 || grid[idx(x, surfaceY - 1)] !== TILES.AIR) continue
+
+    const n = noise2D(x * 0.05, surfaceY * 0.05)
+    const r = rng()
+
+    if (r < treeChance && n > -0.2) {
+      // Tree: 2-4 tiles tall trunk + leaves on top
+      const treeHeight = 2 + Math.floor(rng() * 3)
+      let canPlace = true
+      for (let dy = 1; dy <= treeHeight + 2; dy++) {
+        if (surfaceY - dy < 0 || grid[idx(x, surfaceY - dy)] !== TILES.AIR) {
+          canPlace = false
+          break
+        }
+      }
+      if (canPlace) {
+        // Trunk
+        for (let dy = 1; dy <= treeHeight; dy++) {
+          grid[idx(x, surfaceY - dy)] = TILES.TREE_TRUNK
+        }
+        // Leaf canopy
+        const topY = surfaceY - treeHeight
+        grid[idx(x, topY - 1)] = TILES.TREE_LEAVES
+        grid[idx(x, topY)] = TILES.TREE_LEAVES
+        if (x > 0 && grid[idx(x - 1, topY)] === TILES.AIR) grid[idx(x - 1, topY)] = TILES.TREE_LEAVES
+        if (x < WORLD_WIDTH - 1 && grid[idx(x + 1, topY)] === TILES.AIR) grid[idx(x + 1, topY)] = TILES.TREE_LEAVES
+        if (x > 0 && grid[idx(x - 1, topY - 1)] === TILES.AIR) grid[idx(x - 1, topY - 1)] = TILES.TREE_LEAVES
+        if (x < WORLD_WIDTH - 1 && grid[idx(x + 1, topY - 1)] === TILES.AIR) grid[idx(x + 1, topY - 1)] = TILES.TREE_LEAVES
+      }
+    } else if (r < treeChance + bushChance && n > -0.3) {
+      grid[idx(x, surfaceY - 1)] = TILES.BUSH
+    } else if (r < treeChance + bushChance + grassChance) {
+      grid[idx(x, surfaceY - 1)] = TILES.TALL_GRASS
+    }
+  }
+
+  // Mushrooms in caves (near cave floors in dark areas)
+  const mushroomChance = 0.005 + fertility * 0.01
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    const surfaceY = Math.floor(surfaceHeights[x])
+    for (let y = surfaceY + 10; y < WORLD_HEIGHT - 10; y++) {
+      if (grid[idx(x, y)] !== TILES.AIR) continue
+      if (y + 1 >= WORLD_HEIGHT) continue
+      const below = grid[idx(x, y + 1)]
+      if (below === TILES.STONE || below === TILES.SOIL || below === TILES.CLAY) {
+        if (rng() < mushroomChance) {
+          grid[idx(x, y)] = TILES.MUSHROOM
+        }
+      }
+    }
+  }
+}
+
 // Find a flat surface spot suitable for placing a structure (village, etc.)
-export function findFlatSurface(surfaceHeights, minWidth, rng) {
+// excludeZones: array of { x, radius } to keep distance from existing placements
+export function findFlatSurface(surfaceHeights, minWidth, rng, excludeZones = []) {
   let bestX = -1
   let bestFlatness = Infinity
 
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     const x = Math.floor(rng() * (WORLD_WIDTH - minWidth))
+
+    // Check distance from excluded zones
+    let tooClose = false
+    for (const zone of excludeZones) {
+      const dist = Math.abs(x - zone.x)
+      const wrappedDist = Math.min(dist, WORLD_WIDTH - dist)
+      if (wrappedDist < zone.radius) {
+        tooClose = true
+        break
+      }
+    }
+    if (tooClose) continue
+
     let maxVariation = 0
     const baseY = surfaceHeights[x]
     for (let dx = 0; dx < minWidth; dx++) {

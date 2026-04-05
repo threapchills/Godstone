@@ -6,6 +6,12 @@ import { buildPalette } from '../world/TileTypes.js'
 import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
 import Tablet from '../civilisation/Tablet.js'
+import Minimap from '../ui/Minimap.js'
+
+const VILLAGE_COUNT = 4
+const TABLET_COUNT = 3
+const VILLAGE_SPACING = 80 // minimum tile distance between villages
+const DAY_DURATION = 120000 // 2 minutes per full day/night cycle
 
 export default class WorldScene extends Phaser.Scene {
   constructor() {
@@ -21,7 +27,8 @@ export default class WorldScene extends Phaser.Scene {
 
     // Set sky colour
     const palette = buildPalette(params.element1, params.element2, params.elementRatio)
-    this.cameras.main.setBackgroundColor(palette.skyColour)
+    this.baseSkyColour = palette.skyColour
+    this.cameras.main.setBackgroundColor(this.baseSkyColour)
 
     // Show loading text while generating
     const loadText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Shaping the world...', {
@@ -67,48 +74,85 @@ export default class WorldScene extends Phaser.Scene {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
 
-    // Place village on a flat surface
-    const villageX = findFlatSurface(worldData.surfaceHeights, 6, rng)
-    const villageY = Math.floor(worldData.surfaceHeights[villageX])
-    this.village = new Village(this, villageX, villageY, params)
+    // Place multiple villages with spacing
+    this.villages = []
+    const excludeZones = []
+    for (let i = 0; i < VILLAGE_COUNT; i++) {
+      const vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
+      if (vx < 0) continue
+      const vy = Math.floor(worldData.surfaceHeights[vx])
+      const village = new Village(this, vx, vy, params)
+      this.villages.push(village)
+      excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
+    }
 
-    // Place tablet underground
-    const tabletPos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng)
-    this.tablet = new Tablet(this, tabletPos.x, tabletPos.y, 2)
+    // Place multiple tablets underground
+    this.tablets = []
+    for (let i = 0; i < TABLET_COUNT; i++) {
+      const pos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng)
+      const tablet = new Tablet(this, pos.x, pos.y, i + 2)
+      this.tablets.push(tablet)
 
-    // Spawn god near the village (slightly to the left)
-    const godX = (villageX - 10) * TILE_SIZE + TILE_SIZE / 2
-    const godY = (villageY - 3) * TILE_SIZE
+      // Pickup zone for each tablet
+      const zone = this.add.zone(tablet.worldX, tablet.worldY, TILE_SIZE * 3, TILE_SIZE * 3)
+      this.physics.add.existing(zone, true)
+      this.physics.add.overlap(this.god || { sprite: null }, zone, () => this.onTabletPickup(tablet))
+      tablet._zone = zone
+    }
+
+    // Spawn god near the first village
+    const homeVillage = this.villages[0]
+    const godX = homeVillage
+      ? (homeVillage.tileX - 5) * TILE_SIZE + TILE_SIZE / 2
+      : WORLD_WIDTH * TILE_SIZE / 2
+    const godY = homeVillage
+      ? (homeVillage.tileY - 3) * TILE_SIZE
+      : 50 * TILE_SIZE
     this.god = new God(this, godX, godY, params)
 
     // Physics: god collides with terrain
     this.physics.add.collider(this.god.sprite, layer)
 
+    // Set up tablet overlap detection (now that god exists)
+    this.tablets.forEach(tablet => {
+      this.physics.add.overlap(this.god.sprite, tablet._zone, () => this.onTabletPickup(tablet))
+    })
+
+    // Village delivery zones
+    this.villages.forEach(village => {
+      const zone = this.add.zone(
+        village.worldX, village.worldY - TILE_SIZE, TILE_SIZE * 8, TILE_SIZE * 5
+      )
+      this.physics.add.existing(zone, true)
+      this.physics.add.overlap(this.god.sprite, zone, () => this.onVillageProximity(village))
+      village._zone = zone
+    })
+
     // Camera follows god
     this.cameras.main.startFollow(this.god.sprite, true, 0.1, 0.1)
     this.cameras.main.setDeadzone(100, 50)
 
-    // World bounds for physics (but god can go beyond for wrapping)
+    // World bounds for physics
     this.physics.world.setBounds(0, 0, WORLD_WIDTH * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE)
+
+    // Day/night cycle overlay
+    this.dayNightOverlay = this.add.rectangle(
+      GAME_WIDTH / 2, GAME_HEIGHT / 2,
+      GAME_WIDTH, GAME_HEIGHT,
+      0x000022, 0
+    ).setScrollFactor(0).setDepth(40)
+    this.dayTime = 0
 
     // HUD
     this.createHUD(params)
 
-    // Tablet pickup zone
-    this.tabletZone = this.add.zone(
-      this.tablet.worldX, this.tablet.worldY, TILE_SIZE * 3, TILE_SIZE * 3
-    )
-    this.physics.add.existing(this.tabletZone, true) // static body
-
-    // Village delivery zone
-    this.villageZone = this.add.zone(
-      this.village.worldX, this.village.worldY - TILE_SIZE, TILE_SIZE * 6, TILE_SIZE * 4
-    )
-    this.physics.add.existing(this.villageZone, true)
-
-    // Overlap detection
-    this.physics.add.overlap(this.god.sprite, this.tabletZone, () => this.onTabletPickup())
-    this.physics.add.overlap(this.god.sprite, this.villageZone, () => this.onVillageProximity())
+    // Minimap
+    this.minimap = new Minimap(this, this.worldGrid, params)
+    this.villages.forEach(v => this.minimap.addVillageMarker(v))
+    this.tablets.forEach(t => {
+      const dot = this.minimap.addTabletMarker(t)
+      if (dot) t._minimapDot = dot
+    })
 
     // World ready
     this.worldReady = true
@@ -135,22 +179,37 @@ export default class WorldScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setScrollFactor(0).setDepth(50)
 
-    // Hint text (fades after a few seconds)
-    this.hintText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 30, 'Explore downward to find the ancient tablet', {
+    // Village count
+    this.villageHUD = this.add.text(pad, pad + 36, `Villages: ${this.villages.length}`, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '12px',
+      color: '#daa520',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setScrollFactor(0).setDepth(50)
+
+    // Day/night indicator
+    this.dayNightHUD = this.add.text(pad, pad + 52, '', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '11px',
+      color: '#888888',
+      stroke: '#000000',
+      strokeThickness: 1,
+    }).setScrollFactor(0).setDepth(50)
+
+    // Hint text
+    this.hintText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 30,
+      'Explore the world. Dig deep to find ancient tablets.', {
       fontFamily: 'Georgia, serif',
       fontSize: '12px',
       color: '#666666',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(50)
 
-    this.time.delayedCall(8000, () => {
-      this.tweens.add({
-        targets: this.hintText,
-        alpha: 0,
-        duration: 2000,
-      })
+    this.time.delayedCall(10000, () => {
+      this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
     })
 
-    // Message popup (for events)
+    // Message popup
     this.messageText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, '', {
       fontFamily: 'Georgia, serif',
       fontSize: '18px',
@@ -159,7 +218,7 @@ export default class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(60).setAlpha(0)
 
-    // Coordinates display (useful for testing)
+    // Coordinates
     this.coordText = this.add.text(GAME_WIDTH - pad, pad, '', {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
@@ -168,7 +227,7 @@ export default class WorldScene extends Phaser.Scene {
       strokeThickness: 1,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
 
-    // Minimap indicator (simple depth gauge)
+    // Depth gauge
     this.depthText = this.add.text(GAME_WIDTH - pad, pad + 14, '', {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
@@ -189,30 +248,38 @@ export default class WorldScene extends Phaser.Scene {
     })
   }
 
-  onTabletPickup() {
-    if (!this.tablet || this.tablet.collected) return
-    if (this.tablet.collect()) {
-      this.god.collectTablet({ stage: this.tablet.stage })
+  onTabletPickup(tablet) {
+    if (!tablet || tablet.collected) return
+    if (tablet.collect()) {
+      this.god.collectTablet({ stage: tablet.stage })
       this.tabletHUD.setText(`Tablets: ${this.god.tablets.length}`)
-      this.showMessage('Ancient tablet found! Deliver it to the village.')
+      if (tablet._minimapDot) tablet._minimapDot.setVisible(false)
+      this.showMessage('Ancient tablet found! Deliver it to a village.')
 
-      // Update hint
-      this.hintText.setText('Return to the village to deliver knowledge')
+      this.hintText.setText('Visit a village to deliver knowledge')
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
     }
   }
 
-  onVillageProximity() {
-    if (!this.village || this.god.tablets.length === 0) return
-    if (this.village.hasReceivedTablet) return
+  onVillageProximity(village) {
+    if (!village || this.god.tablets.length === 0) return
+    if (village.hasReceivedTablet) return
 
-    if (this.village.receiveTablet()) {
+    if (village.receiveTablet()) {
       this.god.tablets.shift()
       this.tabletHUD.setText(`Tablets: ${this.god.tablets.length}`)
-      this.showMessage('God has spoken! The village advances.', 4000)
+      this.showMessage(`God has spoken! ${village.name} advances.`, 4000)
 
-      this.hintText.setText('The village grows stronger')
+      // Count advanced villages
+      const advanced = this.villages.filter(v => v.hasReceivedTablet).length
+      this.villageHUD.setText(`Villages: ${this.villages.length} (${advanced} advanced)`)
+
+      if (this.god.tablets.length > 0) {
+        this.hintText.setText(`${this.god.tablets.length} tablet${this.god.tablets.length > 1 ? 's' : ''} remaining`)
+      } else {
+        this.hintText.setText('Explore deeper for more tablets')
+      }
       this.hintText.setAlpha(1)
       this.time.delayedCall(5000, () => {
         this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
@@ -234,20 +301,32 @@ export default class WorldScene extends Phaser.Scene {
       this.god.sprite.x -= worldPixelWidth
     }
 
-    // Kill plane: if god falls below the world, respawn at surface
+    // Kill plane
     if (this.god.sprite.y > WORLD_HEIGHT * TILE_SIZE) {
       this.respawnGod()
     }
 
-    // Village belief update
-    if (this.village) {
-      const dx = this.god.sprite.x - this.village.worldX
-      const dy = this.god.sprite.y - this.village.worldY
+    // Day/night cycle
+    this.dayTime = (time % DAY_DURATION) / DAY_DURATION
+    const nightIntensity = Math.max(0, Math.sin(this.dayTime * Math.PI * 2 - Math.PI / 2)) * 0.4
+    this.dayNightOverlay.setAlpha(nightIntensity)
+
+    const isDay = this.dayTime < 0.5
+    this.dayNightHUD.setText(isDay ? 'Day' : 'Night')
+    this.dayNightHUD.setColor(isDay ? '#ddaa44' : '#6666aa')
+
+    // Update all village beliefs
+    for (const village of this.villages) {
+      const dx = this.god.sprite.x - village.worldX
+      const dy = this.god.sprite.y - village.worldY
       const dist = Math.sqrt(dx * dx + dy * dy)
-      this.village.updateBelief(dist, delta)
+      village.updateBelief(dist, delta)
     }
 
-    // HUD updates
+    // Minimap
+    if (this.minimap) this.minimap.update(this.god.sprite)
+
+    // HUD
     const tileX = Math.floor(this.god.sprite.x / TILE_SIZE)
     const tileY = Math.floor(this.god.sprite.y / TILE_SIZE)
     this.coordText.setText(`${tileX}, ${tileY}`)
@@ -257,10 +336,10 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   respawnGod() {
-    // Respawn above the village
-    if (this.village) {
-      this.god.sprite.x = this.village.worldX
-      this.god.sprite.y = this.village.worldY - TILE_SIZE * 5
+    const home = this.villages[0]
+    if (home) {
+      this.god.sprite.x = home.worldX
+      this.god.sprite.y = home.worldY - TILE_SIZE * 5
     } else {
       this.god.sprite.x = WORLD_WIDTH * TILE_SIZE / 2
       this.god.sprite.y = TILE_SIZE * 10
