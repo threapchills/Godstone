@@ -3,14 +3,40 @@ import { TILES } from './TileTypes.js'
 import { buildPalette } from './TileTypes.js'
 
 const POOL_SIZE = 150
-const BASE_SPAWN_RATE = 8 // ambient particles per second
+const BASE_SPAWN_RATE = 8
+const SOFT_TEX_SIZE = 32  // px; soft circle texture resolution
+const SOFT_TEX_HALF = SOFT_TEX_SIZE / 2
 
 // Wind tendencies per element; blended by the world's element ratio
 const ELEMENT_WINDS = {
-  fire:  { x: 0,  y: -12 },  // thermals rise
-  water: { x: 15, y: 2 },    // lateral gusts
-  air:   { x: 25, y: -3 },   // strong lateral
-  earth: { x: 3,  y: -5 },   // gentle upward drift
+  fire:  { x: 0,  y: -12 },
+  water: { x: 15, y: 2 },
+  air:   { x: 25, y: -3 },
+  earth: { x: 3,  y: -5 },
+}
+
+// Generate a radial-gradient circle: bright centre, transparent edge
+function createSoftCircleTexture(scene) {
+  const key = '_softParticle'
+  if (scene.textures.exists(key)) return key
+
+  const canvas = document.createElement('canvas')
+  canvas.width = SOFT_TEX_SIZE
+  canvas.height = SOFT_TEX_SIZE
+  const ctx = canvas.getContext('2d')
+  const grad = ctx.createRadialGradient(
+    SOFT_TEX_HALF, SOFT_TEX_HALF, 0,
+    SOFT_TEX_HALF, SOFT_TEX_HALF, SOFT_TEX_HALF
+  )
+  grad.addColorStop(0, 'rgba(255,255,255,1)')
+  grad.addColorStop(0.3, 'rgba(255,255,255,0.7)')
+  grad.addColorStop(0.7, 'rgba(255,255,255,0.2)')
+  grad.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, SOFT_TEX_SIZE, SOFT_TEX_SIZE)
+
+  scene.textures.addCanvas(key, canvas)
+  return key
 }
 
 export default class ParticleEngine {
@@ -52,16 +78,21 @@ export default class ParticleEngine {
       y: w1.y * ratio + w2.y * (1 - ratio),
     }
 
-    // Pre-allocate the pool; every sprite starts invisible
+    // Soft-edged texture shared by all particles
+    const texKey = createSoftCircleTexture(scene)
+
+    // Pre-allocate the pool with image sprites instead of solid circles
     this.pool = new Array(POOL_SIZE)
     for (let i = 0; i < POOL_SIZE; i++) {
-      const sprite = scene.add.circle(0, 0, 2, 0xffffff, 0).setVisible(false).setDepth(6)
+      const sprite = scene.add.image(0, 0, texKey)
+        .setVisible(false).setDepth(6).setAlpha(0).setOrigin(0.5)
       this.pool[i] = {
         sprite,
         x: 0, y: 0, vx: 0, vy: 0,
         life: 0, maxLife: 1,
-        size: 2,
+        sizeStart: 2, sizeEnd: 2,
         flickerRate: 0,
+        type: '',
         active: false,
       }
     }
@@ -79,7 +110,6 @@ export default class ParticleEngine {
     const vb = vt + GAME_HEIGHT
     const margin = 120
 
-    // Advance living particles
     const dtSec = delta / 1000
     for (let i = 0; i < POOL_SIZE; i++) {
       const p = this.pool[i]
@@ -94,27 +124,33 @@ export default class ParticleEngine {
       p.x += p.vx * dtSec
       p.y += p.vy * dtSec
 
-      // Fade envelope: ramp in over first 20% of life, ramp out over last 30%
-      const t = p.life / p.maxLife // 1 = just born, 0 = dead
+      // Life progress: 0 at birth, 1 at death
+      const t = p.life / p.maxLife
+      const progress = 1 - t
+
+      // Fade envelope: ramp in over first 20%, ramp out over last 30%
       let alpha = t < 0.3 ? t / 0.3 : t > 0.8 ? (1 - t) / 0.2 : 1
-      // abs(sin) gives a pulsing glow that never zeroes out
       if (p.flickerRate > 0) {
         alpha *= 0.4 + 0.6 * Math.abs(Math.sin(Date.now() * p.flickerRate))
       } else {
         alpha *= 0.85
       }
 
+      // Size over lifetime: lerp between start and end
+      const currentSize = p.sizeStart + (p.sizeEnd - p.sizeStart) * progress
+      const scale = currentSize / SOFT_TEX_HALF
+
       p.sprite.setPosition(p.x, p.y)
       p.sprite.setAlpha(Math.max(0, alpha))
+      p.sprite.setScale(scale)
 
-      // Kill if it drifted well outside the viewport
       if (p.x < vl - margin || p.x > vr + margin || p.y < vt - margin || p.y > vb + margin) {
         p.active = false
         p.sprite.setVisible(false)
       }
     }
 
-    // Spawn new particles at ~BASE_SPAWN_RATE per second
+    // Spawn
     this.spawnAccum += delta
     const interval = 1000 / BASE_SPAWN_RATE
     while (this.spawnAccum >= interval) {
@@ -132,21 +168,19 @@ export default class ParticleEngine {
     const underground = godTileY > surfaceY + 5
     const night = dayTime > 0.5
 
-    // Weighted element pick
     const el = Math.random() < this.el1Weight ? this.el1 : this.el2
     const defs = this.candidatesFor(el, underground, night)
     if (defs.length === 0) return
 
     const def = defs[Math.floor(Math.random() * defs.length)]
 
-    // Position
     let x, y
     if (def.spawn === 'edge') {
       const edge = Math.random() * 4 | 0
       if (edge === 0)      { x = vl - 10; y = vt + Math.random() * GAME_HEIGHT }
-      else if (edge === 1)  { x = vr + 10; y = vt + Math.random() * GAME_HEIGHT }
-      else if (edge === 2)  { x = vl + Math.random() * GAME_WIDTH; y = vt - 10 }
-      else                  { x = vl + Math.random() * GAME_WIDTH; y = vb + 10 }
+      else if (edge === 1) { x = vr + 10; y = vt + Math.random() * GAME_HEIGHT }
+      else if (edge === 2) { x = vl + Math.random() * GAME_WIDTH; y = vt - 10 }
+      else                 { x = vl + Math.random() * GAME_WIDTH; y = vb + 10 }
     } else if (def.spawn === 'area') {
       x = vl + Math.random() * GAME_WIDTH
       y = vt + Math.random() * GAME_HEIGHT
@@ -161,60 +195,58 @@ export default class ParticleEngine {
     this.spawn(def, x, y, colour)
   }
 
-  // ── Particle type catalogues per element ───────────────────
-  // Each def: key (colour bank), size [min,max], life [min,max] in ms,
-  // vx/vy [min,max] px/s, spawn mode, depth, optional flickerRate & tiles
+  // ── Particle type catalogues ───────────────────────────────
+  // sizeEnd: final radius relative to spawn size. >1 = expands, <1 = shrinks.
 
   candidatesFor(element, underground, night) {
     const c = []
 
     if (element === 'fire') {
       if (!underground) {
-        c.push({ key: 'ember', size: [2, 4], life: [2000, 4000], vx: [-5, 5], vy: [-20, -8], spawn: 'edge', depth: 11, flickerRate: 0.006 })
-        c.push({ key: 'smoke', size: [4, 8], life: [3000, 6000], vx: [-8, 8], vy: [-15, -5], spawn: 'edge', depth: 5 })
-        if (!night) c.push({ key: 'shimmer', size: [6, 12], life: [1500, 3000], vx: [-2, 2], vy: [-3, 3], spawn: 'area', depth: 5, flickerRate: 0.01 })
+        c.push({ key: 'ember', size: [2, 4], sizeEnd: 0.3, life: [2000, 4000], vx: [-5, 5], vy: [-20, -8], spawn: 'edge', depth: 11, flickerRate: 0.006 })
+        c.push({ key: 'smoke', size: [4, 8], sizeEnd: 2.0, life: [3000, 6000], vx: [-8, 8], vy: [-15, -5], spawn: 'edge', depth: 5 })
+        if (!night) c.push({ key: 'shimmer', size: [6, 12], sizeEnd: 1.3, life: [1500, 3000], vx: [-2, 2], vy: [-3, 3], spawn: 'area', depth: 5, flickerRate: 0.01 })
       } else {
-        c.push({ key: 'magmaSpark', size: [2, 3], life: [800, 1500], vx: [-15, 15], vy: [-30, -10], spawn: 'tile', tiles: [TILES.LAVA, TILES.MAGMA_ROCK], depth: 11, flickerRate: 0.008 })
-        c.push({ key: 'ember', size: [2, 3.5], life: [1500, 3000], vx: [-5, 5], vy: [-12, -4], spawn: 'area', depth: 6, flickerRate: 0.005 })
+        c.push({ key: 'magmaSpark', size: [2, 3], sizeEnd: 0.2, life: [800, 1500], vx: [-15, 15], vy: [-30, -10], spawn: 'tile', tiles: [TILES.LAVA, TILES.MAGMA_ROCK], depth: 11, flickerRate: 0.008 })
+        c.push({ key: 'ember', size: [2, 3.5], sizeEnd: 0.3, life: [1500, 3000], vx: [-5, 5], vy: [-12, -4], spawn: 'area', depth: 6, flickerRate: 0.005 })
       }
     }
 
     if (element === 'water') {
       if (!underground) {
-        c.push({ key: 'spray', size: [2, 4], life: [1500, 3000], vx: [-10, 10], vy: [-8, 2], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
-        c.push({ key: 'foam', size: [3, 5], life: [2000, 4000], vx: [-12, 12], vy: [-3, 3], spawn: 'edge', depth: 5 })
+        c.push({ key: 'spray', size: [2, 4], sizeEnd: 0.5, life: [1500, 3000], vx: [-10, 10], vy: [-8, 2], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
+        c.push({ key: 'foam', size: [3, 5], sizeEnd: 1.5, life: [2000, 4000], vx: [-12, 12], vy: [-3, 3], spawn: 'edge', depth: 5 })
       } else {
-        c.push({ key: 'drip', size: [1.5, 2.5], life: [1000, 2000], vx: [-1, 1], vy: [15, 30], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
-        c.push({ key: 'spray', size: [2, 3.5], life: [1500, 2500], vx: [-5, 5], vy: [-3, 3], spawn: 'area', depth: 5 })
+        c.push({ key: 'drip', size: [1.5, 2.5], sizeEnd: 0.4, life: [1000, 2000], vx: [-1, 1], vy: [15, 30], spawn: 'tile', tiles: [TILES.WATER, TILES.DEEP_WATER], depth: 6 })
+        c.push({ key: 'spray', size: [2, 3.5], sizeEnd: 1.3, life: [1500, 2500], vx: [-5, 5], vy: [-3, 3], spawn: 'area', depth: 5 })
       }
     }
 
     if (element === 'air') {
       if (!underground) {
-        c.push({ key: 'leaf', size: [3, 5], life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6 })
-        c.push({ key: 'cloudWisp', size: [6, 12], life: [4000, 7000], vx: [5, 15], vy: [-2, 2], spawn: 'edge', depth: 5 })
+        c.push({ key: 'leaf', size: [3, 5], sizeEnd: 0.8, life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6 })
+        c.push({ key: 'cloudWisp', size: [6, 12], sizeEnd: 1.5, life: [4000, 7000], vx: [5, 15], vy: [-2, 2], spawn: 'edge', depth: 5 })
       } else {
-        c.push({ key: 'dustMote', size: [2, 3.5], life: [3000, 5000], vx: [-3, 3], vy: [-2, 2], spawn: 'area', depth: 5 })
+        c.push({ key: 'dustMote', size: [2, 3.5], sizeEnd: 1.2, life: [3000, 5000], vx: [-3, 3], vy: [-2, 2], spawn: 'area', depth: 5 })
       }
     }
 
     if (element === 'earth') {
       if (!underground) {
-        c.push({ key: 'pollen', size: [2, 3.5], life: [3000, 5000], vx: [-5, 8], vy: [-10, -3], spawn: 'area', depth: 6 })
-        c.push({ key: 'dust', size: [3, 5], life: [2000, 4000], vx: [-8, 8], vy: [-3, 3], spawn: 'edge', depth: 5 })
-        if (night) c.push({ key: 'firefly', size: [2, 3.5], life: [4000, 8000], vx: [-5, 5], vy: [-5, 5], spawn: 'area', depth: 11, flickerRate: 0.004 })
+        c.push({ key: 'pollen', size: [2, 3.5], sizeEnd: 0.7, life: [3000, 5000], vx: [-5, 8], vy: [-10, -3], spawn: 'area', depth: 6 })
+        c.push({ key: 'dust', size: [3, 5], sizeEnd: 1.4, life: [2000, 4000], vx: [-8, 8], vy: [-3, 3], spawn: 'edge', depth: 5 })
+        if (night) c.push({ key: 'firefly', size: [2, 3.5], sizeEnd: 1.0, life: [4000, 8000], vx: [-5, 5], vy: [-5, 5], spawn: 'area', depth: 11, flickerRate: 0.004 })
       } else {
-        c.push({ key: 'spore', size: [2, 3.5], life: [2500, 4000], vx: [-3, 3], vy: [-8, -2], spawn: 'tile', tiles: [TILES.MUSHROOM], depth: 6 })
-        c.push({ key: 'dustMote', size: [2, 3.5], life: [3000, 5000], vx: [-2, 2], vy: [-2, 2], spawn: 'area', depth: 5 })
-        if (night) c.push({ key: 'firefly', size: [2, 3], life: [3000, 6000], vx: [-4, 4], vy: [-4, 4], spawn: 'area', depth: 11, flickerRate: 0.003 })
+        c.push({ key: 'spore', size: [2, 3.5], sizeEnd: 1.3, life: [2500, 4000], vx: [-3, 3], vy: [-8, -2], spawn: 'tile', tiles: [TILES.MUSHROOM], depth: 6 })
+        c.push({ key: 'dustMote', size: [2, 3.5], sizeEnd: 1.2, life: [3000, 5000], vx: [-2, 2], vy: [-2, 2], spawn: 'area', depth: 5 })
+        if (night) c.push({ key: 'firefly', size: [2, 3], sizeEnd: 1.0, life: [3000, 6000], vx: [-4, 4], vy: [-4, 4], spawn: 'area', depth: 11, flickerRate: 0.003 })
       }
     }
 
     return c
   }
 
-  // ── Tile scanner: finds a matching tile near the viewport ──
-  // Samples randomly rather than brute-forcing every cell
+  // ── Tile scanner ───────────────────────────────────────────
 
   findTile(tileTypes, vl, vt, vr, vb) {
     const wanted = new Set(tileTypes)
@@ -245,10 +277,11 @@ export default class ParticleEngine {
     for (let i = 0; i < POOL_SIZE; i++) {
       if (!this.pool[i].active) { p = this.pool[i]; break }
     }
-    if (!p) return // pool exhausted; skip gracefully
+    if (!p) return
 
     const size = def.size[0] + Math.random() * (def.size[1] - def.size[0])
     const life = def.life[0] + Math.random() * (def.life[1] - def.life[0])
+    const endMultiplier = def.sizeEnd !== undefined ? def.sizeEnd : 1.0
 
     p.active = true
     p.type = def.key
@@ -258,12 +291,13 @@ export default class ParticleEngine {
     p.vy = def.vy[0] + Math.random() * (def.vy[1] - def.vy[0])
     p.life = life
     p.maxLife = life
-    p.size = size
+    p.sizeStart = size
+    p.sizeEnd = size * endMultiplier
     p.flickerRate = def.flickerRate || 0
 
-    p.sprite.setRadius(size)
-    p.sprite.setFillStyle(colour)
+    p.sprite.setTint(colour)
     p.sprite.setPosition(x, y)
+    p.sprite.setScale(size / SOFT_TEX_HALF)
     p.sprite.setDepth(def.depth || 6)
     p.sprite.setVisible(true)
     p.sprite.setAlpha(0)
