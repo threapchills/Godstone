@@ -113,7 +113,7 @@ export default class God {
     this.sprite.setDepth(10)
   }
 
-  update(worldGrid) {
+  update(worldGrid, time) {
     const body = this.sprite.body
     const onGround = body.blocked.down
 
@@ -122,14 +122,17 @@ export default class God {
 
     // Horizontal movement
     const speed = this.isInLiquid ? GOD_SPEED * 0.6 : GOD_SPEED
+    let moving = false
     if (this.cursors.left.isDown || this.wasd.left.isDown) {
       body.setVelocityX(-speed)
+      moving = true
       if (this.facingRight) {
         this.sprite.setFlipX(true)
         this.facingRight = false
       }
     } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
       body.setVelocityX(speed)
+      moving = true
       if (!this.facingRight) {
         this.sprite.setFlipX(false)
         this.facingRight = true
@@ -138,9 +141,15 @@ export default class God {
       body.setVelocityX(0)
     }
 
+    // Walking bob animation
+    if (moving && onGround && time) {
+      this.sprite.rotation = Math.sin(time * 0.012) * 0.06
+    } else {
+      this.sprite.rotation *= 0.85 // ease back to upright
+    }
+
     // Jumping / swimming upward
     if (this.isInLiquid) {
-      // Swim: hold up/space to rise, otherwise sink slowly
       body.setGravityY(GRAVITY * 0.3)
       if (this.cursors.up.isDown || this.wasd.up.isDown || this.spaceKey.isDown) {
         body.setVelocityY(-GOD_SPEED * 0.8)
@@ -191,6 +200,28 @@ export default class God {
     // Update the tilemap
     if (worldGrid.layer) {
       worldGrid.layer.putTileAt(-1, tileX, tileY)
+    }
+    // Dig debris particles
+    this.spawnDebris(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2)
+  }
+
+  spawnDebris(x, y) {
+    for (let i = 0; i < 6; i++) {
+      const particle = this.scene.add.circle(
+        x + (Math.random() - 0.5) * TILE_SIZE,
+        y + (Math.random() - 0.5) * TILE_SIZE,
+        1 + Math.random(),
+        0x8a7a5a, 1
+      ).setDepth(11)
+
+      this.scene.tweens.add({
+        targets: particle,
+        x: particle.x + (Math.random() - 0.5) * 20,
+        y: particle.y - Math.random() * 15,
+        alpha: 0,
+        duration: 400 + Math.random() * 200,
+        onComplete: () => particle.destroy(),
+      })
     }
   }
 

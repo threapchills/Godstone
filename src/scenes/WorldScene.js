@@ -7,6 +7,8 @@ import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
 import Tablet from '../civilisation/Tablet.js'
 import Minimap from '../ui/Minimap.js'
+import PortalHenge from '../world/PortalHenge.js'
+import ParallaxSky from '../ui/ParallaxSky.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -100,6 +102,14 @@ export default class WorldScene extends Phaser.Scene {
       tablet._zone = zone
     }
 
+    // Place portal henge away from villages
+    const portalX = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
+    if (portalX >= 0) {
+      const portalY = Math.floor(worldData.surfaceHeights[portalX])
+      this.portalHenge = new PortalHenge(this, portalX, portalY, params)
+      excludeZones.push({ x: portalX, radius: 40 })
+    }
+
     // Spawn god near the first village
     const homeVillage = this.villages[0]
     const godX = homeVillage
@@ -142,6 +152,9 @@ export default class WorldScene extends Phaser.Scene {
       0x000022, 0
     ).setScrollFactor(0).setDepth(40)
     this.dayTime = 0
+
+    // Parallax sky background
+    this.parallaxSky = new ParallaxSky(this, params)
 
     // HUD
     this.createHUD(params)
@@ -291,7 +304,7 @@ export default class WorldScene extends Phaser.Scene {
     if (!this.worldReady) return
 
     // God movement
-    this.god.update(this.worldGrid)
+    this.god.update(this.worldGrid, time)
 
     // Horizontal world wrapping
     const worldPixelWidth = WORLD_WIDTH * TILE_SIZE
