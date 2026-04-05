@@ -129,6 +129,13 @@ export default class Village {
     this.population += 3
     this.updateBeliefBar()
 
+    // Update label to show stage
+    const stageNames = ['', 'Cave dwellers', 'Fire-makers', 'Farmers', 'Small village', 'Large village', 'Town', 'Civilisation']
+    this.label.setText(`${this.name} (${stageNames[this.stage]})`)
+
+    // Upgrade visual: make the sprite larger and add detail
+    this.upgradeVisual()
+
     // Flash effect
     this.scene.tweens.add({
       targets: this.sprite,
@@ -139,6 +146,39 @@ export default class Village {
     })
 
     return true
+  }
+
+  upgradeVisual() {
+    // Add a secondary structure to show growth
+    const px = this.tileX * TILE_SIZE + TILE_SIZE / 2
+    const py = this.tileY * TILE_SIZE
+
+    // Stage 2+: add a fire pit or second hut
+    if (this.stage >= 2) {
+      const firepit = this.scene.add.circle(px + TILE_SIZE * 3, py - 2, 3, 0xff6600, 0.8)
+      firepit.setDepth(5)
+
+      // Fire flicker
+      this.scene.tweens.add({
+        targets: firepit,
+        alpha: { from: 0.8, to: 0.4 },
+        scaleX: { from: 1, to: 1.3 },
+        duration: 500,
+        yoyo: true,
+        repeat: -1,
+      })
+
+      // Small smoke column
+      const smoke = this.scene.add.circle(px + TILE_SIZE * 3, py - 8, 2, 0x888888, 0.3)
+      smoke.setDepth(5)
+      this.scene.tweens.add({
+        targets: smoke,
+        y: py - 20,
+        alpha: 0,
+        duration: 2000,
+        repeat: -1,
+      })
+    }
   }
 
   // Passive belief generation when god is nearby

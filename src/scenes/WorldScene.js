@@ -9,6 +9,7 @@ import Tablet from '../civilisation/Tablet.js'
 import Minimap from '../ui/Minimap.js'
 import PortalHenge from '../world/PortalHenge.js'
 import ParallaxSky from '../ui/ParallaxSky.js'
+import CritterManager from '../world/Critters.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -155,6 +156,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // Parallax sky background
     this.parallaxSky = new ParallaxSky(this, params)
+
+    // Ambient critters
+    this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
 
     // HUD
     this.createHUD(params)
@@ -335,6 +339,9 @@ export default class WorldScene extends Phaser.Scene {
       const dist = Math.sqrt(dx * dx + dy * dy)
       village.updateBelief(dist, delta)
     }
+
+    // Critter AI
+    if (this.critters) this.critters.update(delta)
 
     // Minimap
     if (this.minimap) this.minimap.update(this.god.sprite)
