@@ -10,10 +10,8 @@ Human creative director: Mike Whyle. AI builds. Mike directs. One step at a time
 
 ## Commands
 
-> **Note:** Project scaffold not yet initialised. Commands below reflect the intended stack; run these once after `npm install` is available.
-
 ```bash
-npm run dev       # Vite dev server with HMR
+npm run dev       # Vite dev server with HMR (port 3000)
 npm run build     # Production build to dist/
 npm run preview   # Serve the production build locally
 ```
@@ -25,25 +23,37 @@ Deployment is via GitHub Pages from the `dist/` output of `npm run build`. No se
 **Stack:** Phaser 3 (game framework) + Vite (build tooling). Multiplayer backend (Colyseus on Fly.io) is Phase 4 and does not exist yet.
 
 **Phase sequence:**
-1. World gen + god movement + basic terrain (current)
+1. World gen + god movement + basic terrain + villages + tablets (complete)
 2. Particle simulation (WebGL falling-sand via Web Worker)
-3. Full single-player loop: villages, tablets, belief, critters, spells
+3. Full single-player loop: all seven stages, spells, population, combat
 4. Multiplayer: portal mechanics, matchmaking, PvP
 5. Sound engine, polish, balance
 
-**Module structure (once scaffolded):**
+**Module structure:**
 
 ```
 src/
-  core/          # Scene management, game config, event bus
-  world/         # Procedural generation — elemental pairs, terrain sliders, biomes
-  god/           # God entity: movement, abilities, spell casting, resurrection
-  civilisation/  # Villages, unit AI, the seven stages, tablet delivery
-  belief/        # Per-village belief: generation, decay, capture logic
-  combat/        # God combat, unit combat, day/night elemental modifiers
-  portal/        # Portal henge, omniverse links, seed system
-  sound/         # Generative ambient engine (Tone.js or Web Audio API — TBD)
-  ui/            # Creation screen, HUD, vocal command display
+  main.js               # Game config, scene registration
+  core/
+    Constants.js         # World size, physics, element definitions
+    EventBus.js          # Cross-module event emitter
+  world/
+    WorldGenerator.js    # Procedural terrain from element pair + sliders
+    WorldRenderer.js     # Tileset texture gen + Phaser tilemap creation
+    TileTypes.js         # Tile IDs, solid/liquid sets, palette builder
+    PortalHenge.js       # Stonehenge portal structure (visual; Phase 4 logic)
+    Critters.js          # Ambient wildlife that walks surfaces
+  god/
+    God.js               # God entity: movement, digging, swimming, tablet collection
+  civilisation/
+    Village.js           # Village: belief, stage progression, tablet reception
+    Tablet.js            # Underground collectible with glow effect
+  scenes/
+    CreationScene.js     # Element/slider selection screen
+    WorldScene.js        # Main gameplay; wires everything together
+  ui/
+    Minimap.js           # Corner world overview with markers
+    ParallaxSky.js       # Layered sky background
 ```
 
 Each module is loosely coupled. Modules communicate via `core/` (event bus or shared state); direct cross-module imports are a smell. The particle simulation (Phase 2) will run in a Web Worker and composite onto the Phaser canvas — it is not a Phaser system.
