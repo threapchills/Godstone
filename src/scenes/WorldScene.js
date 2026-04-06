@@ -14,7 +14,7 @@ import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
 import FoliageRenderer from '../world/FoliageRenderer.js'
-import ParallaxForeground from '../world/ParallaxForeground.js'
+// ParallaxForeground removed: produced ghostly floating silhouettes
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -106,6 +106,9 @@ export default class WorldScene extends Phaser.Scene {
         if (vx < 0) continue
         vy = Math.floor(worldData.surfaceHeights[vx])
       }
+      // Snap downward to the actual topmost solid tile in case erosion
+      // or post-pass terrain edits left the chosen y above the ground
+      vy = this.snapToGround(worldData.grid, vx, vy)
       const village = new Village(this, vx, vy, params)
       this.villages.push(village)
       excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
@@ -180,10 +183,7 @@ export default class WorldScene extends Phaser.Scene {
     this.dayTime = 0
 
     // Parallax sky background
-    this.parallaxSky = new ParallaxSky(this, params)
-    
-    // Parallax foreground overlay
-    this.parallaxForeground = new ParallaxForeground(this, palette)
+    this.parallaxSky = new ParallaxSky(this, params, palette)
 
     // Ambient critters
     this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
@@ -235,6 +235,25 @@ export default class WorldScene extends Phaser.Scene {
     this.trauma = 0
     this.timeDilation = 1.0
     this.targetTimeDilation = 1.0
+
+    // Erosion timer: slow geological process
+    this._lastErosionTime = 0
+  }
+
+  // Walk down from a starting tile until we hit solid ground.
+  // Used to align entities with the actual surface, not the cached
+  // surfaceHeights value which may be stale after late-pass edits.
+  snapToGround(grid, x, startY) {
+    let y = Math.max(0, startY)
+    while (y < WORLD_HEIGHT - 1) {
+      const tile = grid[(y + 1) * WORLD_WIDTH + x]
+      // Stop just above the first non-air, non-vegetation tile
+      if (tile !== 0 && tile !== 16 && tile !== 17 && tile !== 18 && tile !== 19 && tile !== 20) {
+        return y + 1
+      }
+      y++
+    }
+    return startY
   }
 
   addTrauma(amount) {
@@ -423,9 +442,18 @@ export default class WorldScene extends Phaser.Scene {
     if (wrapDelta !== 0) {
       this.god.sprite.x += wrapDelta
       this.cameras.main.scrollX += wrapDelta
-      // Notify parallax layers to instantly counteract the camera's sudden jump
       if (this.parallaxSky) this.parallaxSky.shiftWrap(wrapDelta)
-      if (this.parallaxForeground) this.parallaxForeground.shiftWrap(wrapDelta)
+    }
+
+    // Vertical sky ceiling: god can fly up to 30 tiles above the surface
+    // (lots of sky to play in) but not beyond. Beyond that, hard clamp +
+    // gentle downward nudge to prevent infinite ascension.
+    const SKY_CEILING = -30 * TILE_SIZE
+    if (this.god.sprite.y < SKY_CEILING) {
+      this.god.sprite.y = SKY_CEILING
+      if (this.god.sprite.body.velocity.y < 0) {
+        this.god.sprite.body.setVelocityY(20)
+      }
     }
 
     // Custom snappy camera follow
@@ -485,9 +513,8 @@ export default class WorldScene extends Phaser.Scene {
     // Ambient particles
     if (this.particles) this.particles.update(dilatedDelta, this.god.sprite, this.dayTime)
     
-    // Parallax
-    if (this.parallaxSky) this.parallaxSky.update(dilatedDelta)
-    if (this.parallaxForeground) this.parallaxForeground.update(cam.scrollX)
+    // Parallax sky (drives day/night colour shift internally)
+    if (this.parallaxSky) this.parallaxSky.update(dilatedDelta, this.dayTime)
 
     // Active Chunk for Grid Simulator
     const viewPad = 15 // tiles padding outside view
@@ -497,10 +524,24 @@ export default class WorldScene extends Phaser.Scene {
       w: Math.ceil(cam.width / TILE_SIZE) + viewPad * 2,
       h: Math.ceil(cam.height / TILE_SIZE) + viewPad * 2
     }
-    if (this.gridSimulator) this.gridSimulator.update(time, dilatedDelta, activeRect)
+    if (this.gridSimulator) {
+      this.gridSimulator.update(time, dilatedDelta, activeRect)
 
-    // Foliage update (destroy burned trees)
-    if (this.foliageRenderer) this.foliageRenderer.update()
+      // Slow erosion pass: once per second, test a handful of water tiles
+      if (time - this._lastErosionTime > 1000) {
+        this._lastErosionTime = time
+        for (let i = 0; i < 8; i++) {
+          const ex = activeRect.x + Math.floor(Math.random() * activeRect.w)
+          const ey = activeRect.y + Math.floor(Math.random() * activeRect.h)
+          this.gridSimulator.erodeAround(ex, ey)
+        }
+      }
+
+      this.processGridEvents()
+    }
+
+    // Foliage update (wind sway + destroy burned trees)
+    if (this.foliageRenderer) this.foliageRenderer.update(dilatedDelta)
 
     // Minimap
     if (this.minimap) this.minimap.update(this.god.sprite)
@@ -566,6 +607,70 @@ export default class WorldScene extends Phaser.Scene {
         this._prevInLiquid = this.god.isInLiquid
       }
     }
+  }
+
+  // Process falling-sand events: spawn visual particles and trigger sounds
+  processGridEvents() {
+    const events = this.gridSimulator.events
+    if (events.length === 0) return
+
+    // Throttle: max 6 sound triggers per tick to avoid audio spam
+    let soundCount = 0
+    const maxSounds = 6
+
+    for (const ev of events) {
+      const wx = ev.x * TILE_SIZE + TILE_SIZE / 2
+      const wy = ev.y * TILE_SIZE + TILE_SIZE / 2
+
+      switch (ev.type) {
+        case 'steam':
+          // Rising white puff
+          this.spawnGridParticle(wx, wy, 0xcccccc, -20, -40, 800)
+          this.spawnGridParticle(wx + 3, wy - 2, 0xdddddd, -15, -35, 700)
+          break
+
+        case 'hiss':
+          if (soundCount < maxSounds && this.ambience?.initialized) {
+            this.ambience.playHiss()
+            soundCount++
+          }
+          break
+
+        case 'burn':
+          // Orange ember burst upward
+          this.spawnGridParticle(wx, wy, 0xff6600, -5, -25, 500)
+          this.spawnGridParticle(wx, wy, 0xff3300, 5, -20, 400)
+          if (soundCount < maxSounds && this.ambience?.initialized) {
+            this.ambience.playBurn()
+            soundCount++
+          }
+          break
+
+        case 'erode':
+          // Tiny dust puff
+          this.spawnGridParticle(wx, wy, 0x998866, 0, -8, 300)
+          break
+
+        case 'sand_splash':
+          this.spawnGridParticle(wx, wy, 0xc2a64e, -4, -12, 350)
+          this.spawnGridParticle(wx, wy, 0xc2a64e, 4, -10, 300)
+          break
+      }
+    }
+  }
+
+  // Lightweight one-shot particle for grid events (no pool; self-destroying)
+  spawnGridParticle(x, y, colour, vx, vy, duration) {
+    const p = this.add.circle(x, y, 1.5, colour, 0.8).setDepth(11)
+    this.tweens.add({
+      targets: p,
+      x: x + vx * (duration / 1000) + (Math.random() - 0.5) * 6,
+      y: y + vy * (duration / 1000),
+      alpha: 0,
+      scale: 0.3,
+      duration,
+      onComplete: () => p.destroy(),
+    })
   }
 
   shutdown() {

@@ -7,8 +7,14 @@ const GROWTH_THRESHOLD = 20
 const DECLINE_THRESHOLD = 10
 const MAX_VISIBLE_VILLAGERS = 20
 const BUILDING_COUNTS = [0, 1, 3, 5, 8, 12, 16, 22]
-const STAGE_SPREAD = [0, 3, 5, 8, 11, 15, 20, 26]
+const STAGE_SPREAD = [0, 5, 8, 12, 16, 22, 28, 34]
 const STAGE_NAMES = ['', 'Cave dwellers', 'Fire-makers', 'Farmers', 'Small village', 'Large village', 'Town', 'Civilisation']
+
+// Scale multiplier on procedural building textures.
+// Must be larger than the human-sized god (~20px tall) but smaller
+// than the canopy of a tree (~50px tall). 2.5x puts huts at ~40px,
+// houses at ~50px, temples at ~70px tall.
+const BUILDING_SCALE = 2.5
 
 function mulberry32(seed) {
   return function () {
@@ -223,6 +229,7 @@ export default class Village {
       const key = this._ensureBuildingTexture(type)
       const sprite = this.scene.add.sprite(cx + dx, py, key)
       sprite.setOrigin(0.5, 1)
+      sprite.setScale(BUILDING_SCALE)
       sprite.setDepth(5)
       this.buildings.push(sprite)
     }

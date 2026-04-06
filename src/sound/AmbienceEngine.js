@@ -1508,6 +1508,44 @@ export default class AmbienceEngine {
     src.stop(now + 0.25)
   }
 
+  // Lava meeting water: sharp sizzle + white noise burst
+  playHiss() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const hp = ac.createBiquadFilter()
+    hp.type = 'highpass'
+    hp.frequency.setValueAtTime(3000 + Math.random() * 2000, now)
+    hp.Q.value = 0.8
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.25, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.4)
+    src.connect(hp).connect(env).connect(this.proceduralGain)
+    src.start(now)
+    src.stop(now + 0.5)
+  }
+
+  // Vegetation burning: crackling snap
+  playBurn() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const bp = ac.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.setValueAtTime(800 + Math.random() * 600, now)
+    bp.Q.value = 3
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.15, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+    src.connect(bp).connect(env).connect(this.proceduralGain)
+    src.start(now)
+    src.stop(now + 0.15)
+  }
+
   destroy() {
     for (const ch of Object.values(this.channels)) {
       if (ch.abTimer) clearInterval(ch.abTimer)
