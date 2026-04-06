@@ -464,7 +464,7 @@ export default class AmbienceEngine {
     const ac = this.ctx
     const now = ac.currentTime
 
-    // Pentatonic chord (C5-style) — gives that ancient/mystical feel
+    // Pentatonic chord (C5-style); gives that ancient/mystical feel
     const baseFreqs = [523.25, 659.25, 783.99, 987.77]
     const masterGain = ac.createGain()
     masterGain.gain.value = 0.22

@@ -3,8 +3,8 @@ import Phaser from 'phaser'
 
 // An ancient tablet: the key to advancing a village's civilisational stage.
 // Found deep underground; must be physically carried to a village. The
-// visual treatment is deliberately loud — bloom halo, vertical godray,
-// orbiting motes, drifting glyph pip — so it reads through pitch black
+// visual treatment is deliberately loud (bloom halo, vertical godray,
+// orbiting motes, drifting glyph pip) so it reads through pitch black
 // caves from at least eight tiles away. When the god draws close the
 // glow swells and a procedural shimmer plays.
 

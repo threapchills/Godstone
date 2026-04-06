@@ -404,20 +404,36 @@ export default class Village {
 
   // ── Tablet reception ────────────────────────────────
 
-  getNewTablets(godTablets) {
-    return godTablets.filter(t => !this.tabletsReceived.has(t.stage))
+  // The single tablet stage this village will accept next. Stage 1 needs
+  // tablet 2, stage 2 needs tablet 3, and so on. Returns null once the
+  // village has reached the max stage and won't accept any more.
+  get nextRequiredTablet() {
+    return this.stage >= 7 ? null : this.stage + 1
   }
 
-  receiveTablet(tablet) {
-    if (this.tabletsReceived.has(tablet.stage)) return false
-    this.tabletsReceived.add(tablet.stage)
+  // Does the god currently carry the tablet this village wants?
+  // godTablets is the count map { 2: n, 3: n, ... } from God.js.
+  canAccept(godTablets) {
+    const need = this.nextRequiredTablet
+    if (need == null) return false
+    return (godTablets[need] || 0) > 0
+  }
+
+  // Consume the required tablet, advance the stage, rebuild buildings.
+  // Returns the stage that was learned, or null if nothing happened.
+  receiveTablet(stage) {
+    const need = this.nextRequiredTablet
+    if (need == null || stage !== need) return null
+    if (this.tabletsReceived.has(stage)) return null
+
+    this.tabletsReceived.add(stage)
     this.stage = Math.min(this.stage + 1, 7)
     this.belief = Math.min(100, this.belief + 25)
     this.population += 3
     this.updateBeliefBar()
 
     // Flash stage name; normal label refreshes in updatePopulation
-    this.label.setText(`${this.name} — ${STAGE_NAMES[this.stage]}`)
+    this.label.setText(`${this.name}: ${STAGE_NAMES[this.stage]}`)
 
     // Rebuild the entire settlement for the new stage
     this._buildSettlement()
@@ -433,7 +449,7 @@ export default class Village {
       })
     }
 
-    return true
+    return stage
   }
 
   // ── Population dynamics ─────────────────────────────

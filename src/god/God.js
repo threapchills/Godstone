@@ -16,7 +16,7 @@ export default class God {
 
     this.createSprite(scene, x, y, params)
 
-    // Physics — hitbox smaller than visual for forgiving collisions
+    // Physics: hitbox smaller than visual for forgiving collisions
     scene.physics.add.existing(this.sprite)
     this.sprite.body.setGravityY(GRAVITY)
     this.sprite.body.setSize(14, 24)
@@ -28,7 +28,10 @@ export default class God {
     // State
     this.isInLiquid = false
     this.facingRight = true
-    this.tablets = []
+    // tablets is a count map keyed by stage: { 2: 1, 3: 0, 4: 2, ... }
+    // totalEverCollected only ever increments; used by spell unlocks.
+    this.tablets = {}
+    this.totalEverCollected = 0
     this.lastFlapTime = 0
     this.lastDigTime = 0
     this.coyoteTimer = 0
@@ -276,8 +279,24 @@ export default class God {
     }
   }
 
-  collectTablet(tabletData) {
-    this.tablets.push(tabletData)
+  collectTablet(stage) {
+    this.tablets[stage] = (this.tablets[stage] || 0) + 1
+    this.totalEverCollected++
+  }
+
+  // Try to spend a tablet of the given stage. Returns true on success.
+  consumeTablet(stage) {
+    const have = this.tablets[stage] || 0
+    if (have <= 0) return false
+    this.tablets[stage] = have - 1
+    return true
+  }
+
+  // Convenience: total tablets currently in inventory across all stages.
+  get tabletInventoryCount() {
+    let n = 0
+    for (const k in this.tablets) n += this.tablets[k]
+    return n
   }
 
   get position() {
