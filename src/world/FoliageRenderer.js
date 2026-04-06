@@ -34,8 +34,9 @@ export default class FoliageRenderer {
     const sprite = this.scene.add.sprite(worldX, worldY, 'sb_tree')
     sprite.setOrigin(0.5, 1)
 
-    // Epic scale: 4x to 6x normal
-    const scale = 3.5 + rngVal * 2.5
+    // SkyBaby tree is 942x916px; our trees are ~5 tiles (40px) wide.
+    // Target: 40-64px wide = scale 0.042-0.068 of the source sprite.
+    const scale = 0.045 + rngVal * 0.025
     sprite.setScale(scale)
 
     // Tint tree based on the biome procedural colour assigned to tree leaves

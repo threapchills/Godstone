@@ -18,8 +18,8 @@ export default class ParallaxForeground {
       const sprite = scene.add.sprite(x, y, 'sb_tree')
       sprite.setOrigin(0.5, 1)
       
-      // Extremely huge size
-      sprite.setScale(6 + Math.random() * 4)
+      // SkyBaby tree is 942px wide; we want ~200-400px screen silhouettes
+      sprite.setScale(0.2 + Math.random() * 0.2)
       
       // Foreground scroll factor
       const scrollFactor = 1.3 + Math.random() * 0.1
@@ -32,8 +32,8 @@ export default class ParallaxForeground {
       const b = Math.max(0, (groundCol & 0xff) - 40)
       sprite.setTint((r << 16) | (g << 8) | b)
       
-      // Keep alpha subtle so it doesn't entirely blind the player
-      sprite.setAlpha(0.85)
+      // Subtle silhouette; atmospheric, not occluding
+      sprite.setAlpha(0.25)
 
       // Extreme foreground depth
       sprite.setDepth(20)

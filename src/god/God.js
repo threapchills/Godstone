@@ -31,7 +31,6 @@ export default class God {
     this.tablets = []
     this.lastFlapTime = 0
     this.lastDigTime = 0
-    this.lastDigTime = 0
     this.coyoteTimer = 0
     this.isFlying = false
     this.wasOnGround = true

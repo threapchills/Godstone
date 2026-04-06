@@ -24,7 +24,7 @@ export default class CreationScene extends Phaser.Scene {
 
   preload() {
     this.load.image('sb_tileset', 'assets/environment/island_tileset.png')
-    this.load.image('sb_tree', 'assets/environment/tree_variant1.png')
+    this.load.image('sb_tree', 'assets/backgrounds/tree-variant1.png')
     this.load.image('sb_grass', 'assets/environment/grass.png')
     this.load.image('sb_sky1', 'assets/backgrounds/sky_layer_1.jpeg')
     this.load.image('sb_sky2', 'assets/backgrounds/sky_layer_2.png')

@@ -220,20 +220,10 @@ export default class Village {
     for (let i = 0; i < count; i++) {
       const type = this._pickBuildingType(rng)
       const dx = i === 0 ? 0 : (rng() - 0.5) * 2 * spread * TILE_SIZE
-      const key = this._ensureBuildingTexture(type, rng)
+      const key = this._ensureBuildingTexture(type)
       const sprite = this.scene.add.sprite(cx + dx, py, key)
       sprite.setOrigin(0.5, 1)
-      sprite.setDepth(4) // Behind god and critters
-
-      // Massive scale up for the teepees
-      if (key.includes('teepee')) {
-        sprite.setScale(3.5)
-        // Tint them slightly to fit the village palette
-        sprite.setTint(this.wallColour)
-      } else {
-        sprite.setDepth(5)
-      }
-      
+      sprite.setDepth(5)
       this.buildings.push(sprite)
     }
 
@@ -263,20 +253,34 @@ export default class Village {
     return 'longhouse'
   }
 
-  _ensureBuildingTexture(type, rng) {
-    if (type === 'firepit') {
-      const key = `bld-firepit-${this.params.element1}`
-      if (!this.scene.textures.exists(key)) {
-        const canvas = document.createElement('canvas')
-        canvas.width = 8; canvas.height = 6
-        const ctx = canvas.getContext('2d')
-        drawFirepit(ctx, 8, 6)
-        this.scene.textures.addCanvas(key, canvas)
-      }
-      return key
+  _ensureBuildingTexture(type) {
+    const e1 = this.params.element1
+    const e2 = this.params.element2
+    const key = `bld-${type}-${e1}-${e2}`
+    if (this.scene.textures.exists(key)) return key
+
+    const dims = {
+      'lean-to': [16, 12], hut: [20, 16], house: [28, 20],
+      longhouse: [36, 20], tower: [12, 32], temple: [40, 28],
+      wall: [20, 8], firepit: [8, 6],
     }
-    // Return massive pre-rendered teepee textures
-    return rng() > 0.5 ? 'sb_teepee_blue' : 'sb_teepee_green'
+    const [w, h] = dims[type] || [20, 16]
+    const canvas = document.createElement('canvas')
+    canvas.width = w; canvas.height = h
+    const ctx = canvas.getContext('2d')
+
+    const wall = this.wallColour
+    const roof = this.roofColour
+    const dark = this.darkColour
+    const drawFn = {
+      'lean-to': drawLeanTo, hut: drawHut, house: drawHouse,
+      longhouse: drawLonghouse, tower: drawTower, temple: drawTemple,
+      wall: drawWall, firepit: drawFirepit,
+    }
+    if (drawFn[type]) drawFn[type](ctx, w, h, wall, roof, dark)
+
+    this.scene.textures.addCanvas(key, canvas)
+    return key
   }
 
   // ── Villager management ─────────────────────────────
