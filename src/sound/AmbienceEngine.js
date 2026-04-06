@@ -353,13 +353,14 @@ export default class AmbienceEngine {
     const now = ac.currentTime
 
     const srcA = ac.createBufferSource(); srcA.buffer = metaA.buffer; srcA.loop = true
-    // Subtle pitch variance on each source for organic feel (±3%)
-    srcA.playbackRate.value = 1 + (Math.random() - 0.5) * 0.06
+    // Subtle pitch variance per-source (±1.5%); shared direction so A/B don't phase
+    const rateShift = 1 + (Math.random() - 0.5) * 0.03
+    srcA.playbackRate.value = rateShift
     const preA = ac.createGain(); preA.gain.value = metaA.pregain
     const crossA = ac.createGain(); crossA.gain.value = 1
 
     const srcB = ac.createBufferSource(); srcB.buffer = metaB.buffer; srcB.loop = true
-    srcB.playbackRate.value = 1 + (Math.random() - 0.5) * 0.06
+    srcB.playbackRate.value = rateShift // same rate to avoid phasing
     const preB = ac.createGain(); preB.gain.value = metaB.pregain
     const crossB = ac.createGain(); crossB.gain.value = 0
 
@@ -391,8 +392,9 @@ export default class AmbienceEngine {
       const now = this.ctx.currentTime
       ch.abPhase += 2 * Math.PI * ch.abFreq * 0.5
 
-      const base = ch.abDepth * 0.5
-      const amp = ch.abDepth * 0.15
+      // Wider crossfade sweep so A/B blend is clearly audible
+      const base = 0.5
+      const amp = ch.abDepth * 0.45
       const x = Math.max(0, Math.min(1, base + amp * Math.sin(ch.abPhase)))
       const gB = Math.sin(x * Math.PI / 2)
       const gA = Math.cos(x * Math.PI / 2)
@@ -436,6 +438,10 @@ export default class AmbienceEngine {
       ch.gain.gain.setTargetAtTime(vol * vol, this.ctx.currentTime, 0.8)
     }
 
+    // Initialise periodic pad switching
+    this._lastPadSwitch = this.ctx.currentTime
+    this._nextPadSwitchInterval = 60 + Math.random() * 60
+
     // Generate per-world bird species, critter voicings, and villager babble
     const seed = params.seed || 12345
     this._generateBirdSpecies(seed, el1, el2)
@@ -444,28 +450,61 @@ export default class AmbienceEngine {
   }
 
   // t: 0..1 where 0 = midnight, 0.5 = noon
-  // Fire/air swell during day; water/earth swell at night
+  // Modulates pad volumes from three sources: base element mix,
+  // time-of-day cycle, and spatial zone weights.
   setTimeOfDay(t) {
     if (!this.initialized) return
+    const now = this.ctx.currentTime
     const day = Math.sin(t * Math.PI)
     const night = 1 - day
-    const boost = 0.12
+
+    // Zone modifiers: each element channel responds to relevant zones
+    const z = this.zones || { canopy: 0, cavern: 0, water: 0, openAir: 0, depth: 0 }
+    const zoneMod = {
+      air:   0.15 * z.openAir + 0.1 * z.canopy - 0.15 * z.cavern,
+      fire:  0.12 * day - 0.08 * z.water + 0.05 * z.cavern,
+      earth: 0.2 * z.cavern + 0.1 * z.depth - 0.1 * z.openAir,
+      water: 0.2 * z.water + 0.08 * night - 0.1 * z.cavern,
+    }
 
     for (const name of ORDERED) {
       const ch = this.channels[name]
-      const mod = (name === 'fire' || name === 'air') ? day * boost : night * boost
-      const v = ch.baseVolume + mod
-      ch.gain.gain.setTargetAtTime(v * v, this.ctx.currentTime, 1.5)
+      // Time-of-day base modulation
+      const timeMod = (name === 'fire' || name === 'air') ? day * 0.08 : night * 0.08
+      // Combined volume: base + time + zone, clamped
+      const v = Math.max(0.02, Math.min(0.6, ch.baseVolume + timeMod + (zoneMod[name] || 0)))
+      ch.gain.gain.setTargetAtTime(v * v, now, 0.8)
+    }
+
+    // Periodic sound switching: rotate to new variants every 60-120s
+    // so the pad bed doesn't stagnate on the same loops
+    if (!this._lastPadSwitch) this._lastPadSwitch = now
+    if (now - this._lastPadSwitch > this._nextPadSwitchInterval) {
+      this._lastPadSwitch = now
+      this._nextPadSwitchInterval = 60 + Math.random() * 60
+
+      // Pick one random channel to switch
+      const name = ORDERED[Math.floor(Math.random() * ORDERED.length)]
+      const ch = this.channels[name]
+      const loaded = ch.buffers.filter(b => b?.buffer).length
+      if (loaded > 1) {
+        const newIdx = Math.floor(Math.random() * loaded)
+        this._switchSound(name, newIdx)
+      }
     }
   }
 
   // d: 0 = surface, 1 = deepest underground
-  // Underground amplifies earth, muffles air
+  // Underground amplifies earth, muffles air; zone-driven EQ shift
   setDepth(d) {
     if (!this.initialized || !this.eq) return
-    // Shift EQ: deeper = darker, more bass
-    this.eq.low.gain.setTargetAtTime(d * 4, this.ctx.currentTime, 0.5)
-    this.eq.high.gain.setTargetAtTime(-d * 6, this.ctx.currentTime, 0.5)
+    const now = this.ctx.currentTime
+    const cavern = this.zones?.cavern || 0
+    // Shift EQ: deeper = darker, more bass; cave enclosure tightens further
+    this.eq.low.gain.setTargetAtTime(d * 4 + cavern * 2, now, 0.5)
+    this.eq.high.gain.setTargetAtTime(-d * 6 - cavern * 3, now, 0.5)
+    // Mid scoop in caves for that hollow resonance
+    this.eq.mid.gain.setTargetAtTime(-cavern * 3, now, 0.8)
   }
 
   setMasterVolume(v) {
