@@ -1,5 +1,6 @@
 import { TILE_SIZE } from '../core/Constants.js'
 import { buildPalette, TILES } from '../world/TileTypes.js'
+import { WanderingWarrior } from './Warrior.js'
 
 const POP_CAPS = [0, 10, 20, 35, 50, 70, 90, 120]
 const BASE_GROWTH_RATE = 0.3
@@ -290,87 +291,37 @@ export default class Village {
     return key
   }
 
-  // ── Villager management ─────────────────────────────
+  // ── Villager / warrior management ───────────────────
 
-  _ensureVillagerTexture() {
-    const key = `vlgr-${this.params.element1}-${this.params.element2}`
-    if (this.scene.textures.exists(key)) return key
-
-    const canvas = document.createElement('canvas')
-    canvas.width = 4
-    canvas.height = 7
-    const ctx = canvas.getContext('2d')
-
-    // Head (warm skin tone)
-    ctx.fillStyle = '#c8a882'
-    ctx.fillRect(1, 0, 2, 2)
-    // Body (element-coloured clothing)
-    ctx.fillStyle = hexRgb(this.clothingColour)
-    ctx.fillRect(0, 2, 4, 3)
-    // Legs (darker)
-    ctx.fillStyle = hexRgb(blendHex(this.clothingColour, 0x1a1a1a, 0.5))
-    ctx.fillRect(0, 5, 1, 2)
-    ctx.fillRect(3, 5, 1, 2)
-
-    this.scene.textures.addCanvas(key, canvas)
-    return key
-  }
-
+  // Replace generic villagers with stage-appropriate warrior sprites.
+  // Each stage upgrade visibly equips the population: clubs, spears,
+  // bows, swords, mounted units, arcanists. Existing units are wiped
+  // on stage change so the look refreshes.
   updateVillagers(delta) {
-    // Sync visible count with population
     const target = Math.min(MAX_VISIBLE_VILLAGERS, Math.floor(this.population))
+
+    // If the population stage drifted, wipe and respawn so equipment matches
+    if (this.villagerSprites.length > 0 && this.villagerSprites[0].stage !== this.stage) {
+      for (const w of this.villagerSprites) w.destroy()
+      this.villagerSprites = []
+    }
+
     while (this.villagerSprites.length < target) this._spawnVillager()
     while (this.villagerSprites.length > target) {
-      this.villagerSprites.pop().sprite.destroy()
+      this.villagerSprites.pop().destroy()
     }
 
-    const spread = Math.max(STAGE_SPREAD[this.stage], 3) * TILE_SIZE
-    const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2
-
-    for (const v of this.villagerSprites) {
-      if (v.isPaused) {
-        v.pauseTimer -= delta
-        if (v.pauseTimer <= 0) {
-          v.isPaused = false
-          if (Math.random() > 0.5) v.direction *= -1
-        }
-        continue
-      }
-
-      v.sprite.x += v.direction * v.speed * delta / 1000
-      v.sprite.setFlipX(v.direction < 0)
-
-      // Bounce at village edges
-      if (Math.abs(v.sprite.x - cx) > spread) {
-        v.direction *= -1
-        v.sprite.x = cx + Math.sign(v.sprite.x - cx) * spread
-      }
-
-      // Random pause (standing, socialising, working)
-      if (Math.random() < 0.004) {
-        v.isPaused = true
-        v.pauseTimer = 600 + Math.random() * 2000
-      }
-    }
+    for (const w of this.villagerSprites) w.update(delta)
   }
 
   _spawnVillager() {
     const spread = Math.max(STAGE_SPREAD[this.stage], 3) * TILE_SIZE
     const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2
     const py = this.tileY * TILE_SIZE
-    const key = this._ensureVillagerTexture()
     const x = cx + (Math.random() - 0.5) * 2 * spread
-    const sprite = this.scene.add.sprite(x, py, key)
-    sprite.setOrigin(0.5, 1)
-    sprite.setDepth(6)
 
-    this.villagerSprites.push({
-      sprite,
-      direction: Math.random() > 0.5 ? 1 : -1,
-      speed: 6 + Math.random() * 10,
-      pauseTimer: 0,
-      isPaused: false,
-    })
+    const w = new WanderingWarrior(this.scene, x, py, this.stage, this.clothingColour, cx, spread)
+    this.villagerSprites.push(w)
   }
 
   // ── Label and belief bar ────────────────────────────
@@ -417,6 +368,14 @@ export default class Village {
     const need = this.nextRequiredTablet
     if (need == null) return false
     return (godTablets[need] || 0) > 0
+  }
+
+  // Belief gate for sending escorts. Stage 3+ villages have warriors
+  // worth dispatching; high belief is required because low belief
+  // means the population doesn't trust the god enough to part with
+  // their defenders.
+  canDispatchBodyguards() {
+    return this.stage >= 3 && this.belief >= 60
   }
 
   // Consume the required tablet, advance the stage, rebuild buildings.

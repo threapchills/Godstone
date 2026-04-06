@@ -5,6 +5,7 @@ import { createTilesetTexture, createTilemap, setupCollision, WRAP_PAD } from '.
 import { buildPalette } from '../world/TileTypes.js'
 import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
+import Bodyguard from '../civilisation/Bodyguard.js'
 import Tablet from '../civilisation/Tablet.js'
 import Minimap from '../ui/Minimap.js'
 import TabletInventory from '../ui/TabletInventory.js'
@@ -206,6 +207,11 @@ export default class WorldScene extends Phaser.Scene {
     // slots are visible as locked).
     const stagesInWorld = Array.from(new Set(this.tablets.map(t => t.stage))).sort((a, b) => a - b)
     this.tabletInventory = new TabletInventory(this, stagesInWorld)
+
+    // Bodyguards: dispatched escort entities, max 3 active at a time.
+    // Each holds a slot index that maps to a position relative to the god.
+    this.bodyguards = []
+    this._bodyguardCheckTimer = 0
 
     // Minimap
     this.minimap = new Minimap(this, this.worldGrid, params)
@@ -548,6 +554,9 @@ export default class WorldScene extends Phaser.Scene {
       this.tabletInventory.update(this.god.tablets, wanted)
     }
 
+    // Bodyguards: dispatch + update + cleanup
+    this._updateBodyguards(dilatedDelta)
+
     // Population HUD (only redraw when the number changes)
     const totalPop = this.villages.reduce((sum, v) => sum + Math.floor(v.population), 0)
     if (totalPop !== this._prevTotalPop) {
@@ -749,6 +758,75 @@ export default class WorldScene extends Phaser.Scene {
   shutdown() {
     if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
+  }
+
+  // ── Bodyguard dispatch & update ──────────────────────
+  _updateBodyguards(delta) {
+    // Drive each bodyguard's seek behaviour
+    for (const bg of this.bodyguards) {
+      bg.update(delta, this.worldGrid)
+    }
+
+    // Periodic dispatch + cull check (every ~1s) so we don't run the
+    // O(N*V) loop every frame
+    this._bodyguardCheckTimer += delta
+    if (this._bodyguardCheckTimer < 1000) return
+    this._bodyguardCheckTimer = 0
+
+    this._cullBodyguards()
+
+    // Cap escort size; further dispatches are ignored until a slot opens
+    const MAX_BODYGUARDS = 3
+    if (this.bodyguards.length >= MAX_BODYGUARDS) return
+
+    // Look for a willing village within proximity range. The closest
+    // village whose belief and stage qualify gets to send one unit.
+    const range = TILE_SIZE * 18
+    let candidate = null
+    let candidateDist = Infinity
+    for (const v of this.villages) {
+      if (!v.canDispatchBodyguards()) continue
+      // Already has dispatched a bodyguard? Skip until that one is gone.
+      if (this.bodyguards.some(b => b.originVillage === v)) continue
+      const dx = this.god.sprite.x - v.worldX
+      const dy = this.god.sprite.y - v.worldY
+      const d = Math.sqrt(dx * dx + dy * dy)
+      if (d < range && d < candidateDist) {
+        candidate = v
+        candidateDist = d
+      }
+    }
+    if (!candidate) return
+
+    // Dispatch from the village position into the next free formation slot
+    const usedSlots = new Set(this.bodyguards.map(b => b.slotIndex))
+    let slot = 0
+    while (usedSlots.has(slot)) slot++
+
+    const bg = new Bodyguard(
+      this,
+      candidate.worldX,
+      candidate.worldY - TILE_SIZE * 2,
+      candidate.stage,
+      candidate.clothingColour,
+      this.god,
+      slot,
+      candidate
+    )
+    this.physics.add.collider(bg.sprite, this.worldLayer)
+    this.bodyguards.push(bg)
+  }
+
+  // Reclaim escorts whose origin village's belief has dropped below the
+  // dispatch threshold, or whose origin no longer exists.
+  _cullBodyguards() {
+    this.bodyguards = this.bodyguards.filter(bg => {
+      if (!bg.originVillage || bg.originVillage.belief < 35) {
+        bg.destroy()
+        return false
+      }
+      return true
+    })
   }
 
   respawnGod() {
