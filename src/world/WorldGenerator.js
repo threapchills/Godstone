@@ -477,6 +477,64 @@ function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData)
   }
 }
 
+// Find a flat underground surface: a horizontal run of SURFACE/SAND tiles
+// with enough air clearance above for a village sprite, below the primary surface.
+// Returns { x, y } (tile coords of the leftmost tile in the chosen run) or null.
+export function findCaveSurface(grid, surfaceHeights, minWidth, rng, excludeZones = []) {
+  const idx = (x, y) => y * WORLD_WIDTH + x
+  // How far below the primary surface counts as "underground"
+  const MIN_DEPTH = 20
+  // Tiles of air needed above the floor for the village sprite + label
+  const CLEARANCE = 8
+
+  const candidates = []
+
+  for (let y = CLEARANCE + 1; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 2; y++) {
+    let runStart = -1
+    let runLen = 0
+
+    const endRun = () => {
+      if (runLen >= minWidth) {
+        const cx = runStart + Math.floor((runLen - minWidth) / 2)
+        let blocked = false
+        for (const zone of excludeZones) {
+          const d = Math.min(Math.abs(cx - zone.x), WORLD_WIDTH - Math.abs(cx - zone.x))
+          if (d < zone.radius) { blocked = true; break }
+        }
+        if (!blocked) candidates.push({ x: cx, y })
+      }
+      runStart = -1
+      runLen = 0
+    }
+
+    for (let x = 0; x < WORLD_WIDTH; x++) {
+      const tile = grid[idx(x, y)]
+      const isUnderground = y > surfaceHeights[x] + MIN_DEPTH
+
+      if ((tile === TILES.SURFACE || tile === TILES.SAND) && isUnderground) {
+        // Verify air clearance; decorative tiles (grass, mushrooms) are fine
+        let clear = true
+        for (let dy = 1; dy <= CLEARANCE; dy++) {
+          const above = grid[idx(x, y - dy)]
+          if (above !== TILES.AIR && above !== TILES.TALL_GRASS && above !== TILES.MUSHROOM) {
+            clear = false; break
+          }
+        }
+        if (clear) {
+          if (runStart === -1) runStart = x
+          runLen++
+          continue
+        }
+      }
+      endRun()
+    }
+    endRun()
+  }
+
+  if (candidates.length === 0) return null
+  return candidates[Math.floor(rng() * candidates.length)]
+}
+
 // Find a flat surface spot; scans primary surface heights.
 export function findFlatSurface(surfaceHeights, minWidth, rng, excludeZones = []) {
   let bestX = -1

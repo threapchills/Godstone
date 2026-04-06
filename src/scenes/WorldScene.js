@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from '../core/Constants.js'
-import { generateWorld, findFlatSurface, findTabletLocation } from '../world/WorldGenerator.js'
+import { generateWorld, findFlatSurface, findCaveSurface, findTabletLocation } from '../world/WorldGenerator.js'
 import { createTilesetTexture, createTilemap, setupCollision, WRAP_PAD } from '../world/WorldRenderer.js'
 import { buildPalette } from '../world/TileTypes.js'
 import God from '../god/God.js'
@@ -80,13 +80,28 @@ export default class WorldScene extends Phaser.Scene {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
 
-    // Place multiple villages with spacing
+    // Place multiple villages with spacing.
+    // First 2 on the primary surface; last 2 prefer cave/cliff floors so the
+    // world's new verticality is inhabited. Fall back to surface if no cave found.
     this.villages = []
     const excludeZones = []
     for (let i = 0; i < VILLAGE_COUNT; i++) {
-      const vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
-      if (vx < 0) continue
-      const vy = Math.floor(worldData.surfaceHeights[vx])
+      let vx, vy
+      if (i >= 2) {
+        const cavePos = findCaveSurface(worldData.grid, worldData.surfaceHeights, 8, rng, excludeZones)
+        if (cavePos) {
+          vx = cavePos.x
+          vy = cavePos.y
+        } else {
+          vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
+          if (vx < 0) continue
+          vy = Math.floor(worldData.surfaceHeights[vx])
+        }
+      } else {
+        vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
+        if (vx < 0) continue
+        vy = Math.floor(worldData.surfaceHeights[vx])
+      }
       const village = new Village(this, vx, vy, params)
       this.villages.push(village)
       excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
@@ -291,9 +306,9 @@ export default class WorldScene extends Phaser.Scene {
       this.god.collectTablet({ stage: tablet.stage })
       this.tabletHUD.setText(`Tablets: ${this.god.tablets.length}`)
       if (tablet._minimapDot) tablet._minimapDot.setVisible(false)
-      this.showMessage('Ancient tablet found! Deliver it to a village.')
+      this.showMessage('Ancient tablet found! Teach it to your villages.')
 
-      this.hintText.setText('Visit a village to deliver knowledge')
+      this.hintText.setText('Visit villages to spread this knowledge')
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
     }
@@ -301,27 +316,39 @@ export default class WorldScene extends Phaser.Scene {
 
   onVillageProximity(village) {
     if (!village || this.god.tablets.length === 0) return
-    if (village.hasReceivedTablet) return
+    if (village.isReceiving) return
 
-    if (village.receiveTablet()) {
-      this.god.tablets.shift()
-      this.tabletHUD.setText(`Tablets: ${this.god.tablets.length}`)
-      this.showMessage(`God has spoken! ${village.name} advances.`, 4000)
+    const newTablets = village.getNewTablets(this.god.tablets)
+    if (newTablets.length === 0) return
 
-      // Count advanced villages
-      const advanced = this.villages.filter(v => v.hasReceivedTablet).length
-      this.villageHUD.setText(`Villages: ${this.villages.length} (${advanced} advanced)`)
+    // Lock village so overlaps during the sequence don't re-trigger
+    village.isReceiving = true
 
-      if (this.god.tablets.length > 0) {
-        this.hintText.setText(`${this.god.tablets.length} tablet${this.god.tablets.length > 1 ? 's' : ''} remaining`)
-      } else {
-        this.hintText.setText('Explore deeper for more tablets')
-      }
-      this.hintText.setAlpha(1)
-      this.time.delayedCall(5000, () => {
-        this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
+    // Teach each tablet with a 1-second stagger
+    newTablets.forEach((tablet, i) => {
+      this.time.delayedCall(i * 1000, () => {
+        if (village.receiveTablet(tablet)) {
+          this.showMessage(
+            `${village.name} learns tablet ${tablet.stage}!`,
+            900
+          )
+        }
+
+        // After the last tablet in the sequence, update HUD and unlock
+        if (i === newTablets.length - 1) {
+          village.isReceiving = false
+
+          const advanced = this.villages.filter(v => v.tabletsReceived.size > 0).length
+          this.villageHUD.setText(`Villages: ${this.villages.length} (${advanced} enlightened)`)
+
+          this.hintText.setText('Spread knowledge to all villages')
+          this.hintText.setAlpha(1)
+          this.time.delayedCall(5000, () => {
+            this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
+          })
+        }
       })
-    }
+    })
   }
 
   update(time, delta) {
