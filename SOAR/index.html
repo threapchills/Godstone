@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>SOAR: Mystik Skies</title>
+    <link rel="icon" type="image/png" href="assets/sprites/player_green.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+        <div id="ui-layer">
+            <div id="top-bar">
+                <div id="player-stats" class="stats-box green">
+                    <div class="portrait green-portrait"></div>
+                    <div class="info">
+                        <div class="label">PLAYER TRIBE</div>
+                        <div class="value" id="p-pop">0</div>
+                        <div class="sub-value" id="p-tents">Tents: 0</div>
+                    </div>
+                    <div class="health-bar-container">
+                        <div class="health-bar" id="p-health"></div>
+                    </div>
+                </div>
+
+                <div id="score-display">VS</div>
+
+                <div id="enemy-stats" class="stats-box blue">
+                    <div class="health-bar-container">
+                        <div class="health-bar" id="e-health"></div>
+                    </div>
+                    <div class="info">
+                        <div class="label">ENEMY TRIBE</div>
+                        <div class="value" id="e-pop">0</div>
+                        <div class="sub-value" id="e-tents">Tents: 0</div>
+                    </div>
+                    <div class="portrait blue-portrait"></div>
+                </div>
+            </div>
+
+            <div id="bottom-bar">
+                <div id="resources-container">
+                    <div class="resource-row">
+                        <div class="res-icon mana-icon">M</div>
+                        <div class="res-bar-track">
+                            <div class="res-bar-fill mana" id="bar-mana"></div>
+                        </div>
+                        <div class="mana-label">MANA</div>
+                    </div>
+                </div>
+
+                <div id="spells-container">
+                    <div class="spell-slot" id="spell-0">
+                        <div class="key">1</div>
+                        <div class="spell-icon fire-icon"></div>
+                        <div class="name">FIREBALL</div>
+                    </div>
+                    <div class="spell-slot" id="spell-1">
+                        <div class="key">2</div>
+                        <div class="spell-icon air-icon"></div>
+                        <div class="name">AERO</div>
+                    </div>
+                    <div class="spell-slot" id="spell-2">
+                        <div class="key">3</div>
+                        <div class="spell-icon earth-icon"></div>
+                        <div class="name">QUAKE</div>
+                    </div>
+                    <div class="spell-slot" id="spell-3">
+                        <div class="key">4</div>
+                        <div class="spell-icon life-icon"></div>
+                        <div class="name">LIFE</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="message-area"></div>
+            <div id="controls-hint">WASD: Fly | L-Click: Shoot | R-Click: Spell | Scroll: Switch Spell</div>
+        </div>
+
+        <div id="loading-text">Loading...</div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>

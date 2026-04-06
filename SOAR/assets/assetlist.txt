@@ -1,0 +1,38 @@
+/ (Root Directory)
+|-- index.html          // The main entry point (Canvas container)
+|-- style.css           // Simple styling to center the game and handle UI overlays
+|-- README.md           // Instructions for players
+|
+|-- /assets             // ALL your graphics go here
+|   |-- /sprites        // Characters and moving objects
+|   |   |-- villager_green_1.png
+|   |   |-- villager_green_2.png
+|   |   |-- villager_green_3.png
+|   |   |-- villager_green_4.png
+|   |   |-- warrior_green.png
+|   |   |-- villager_blue_1.png
+|   |   |-- villager_blue_2.png
+|   |   |-- villager_blue_3.png
+|   |   |-- villager_blue_4.png
+|   |   |-- warrior_blue.png
+|   |   |-- spell_fireball.png
+|   |   |-- projectile_arrow.png
+|   |
+|   |-- /environment    // Static world objects
+|   |   |-- island_tileset.png
+|   |   |-- tree_variant1.png
+|   |   |-- teepee_green.png
+|   |   |-- teepee_blue.png
+|   |   |-- fireplace_lit.png
+|   |
+|   |-- /backgrounds    // Parallax layers
+|       |-- sky_layer_1.png (Furthest/Slowest)
+|       |-- sky_layer_2.png (Mid)
+|       |-- clouds_fg.png   (Closest/Fastest)
+|
+|-- /js                 // The brains of the operation
+    |-- main.js         // Game Loop and Initialization
+    |-- input.js        // WASD + Mouse handling
+    |-- resources.js    // Logic for Earth, Air, Fire, Water
+    |-- entities.js     // Classes for Villagers and Warriors
+    |-- world.js        // Logic for Floating Islands and Parallax

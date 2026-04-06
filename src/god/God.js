@@ -110,6 +110,7 @@ export default class God {
         this.lastFlapTime = time
         this.isFlying = true
         this.spawnFlapEffect()
+        if (this.scene.addTrauma) this.scene.addTrauma(0.2)
       }
     }
     // Holding space gives a gentle sustained lift (slower than flap bursts)
@@ -122,24 +123,28 @@ export default class God {
     const wantsDigDown = this.cursors.down.isDown || this.wasd.down.isDown
     if (wantsDigDown && time - this.lastDigTime > DIG_RATE) {
       this.lastDigTime = time
+      let dug = false
       if (movingLeft) {
-        this.digAt(worldGrid, -1, 0)
-        this.digAt(worldGrid, -1, 1)
+        dug = this.digAt(worldGrid, -1, 0) || dug
+        dug = this.digAt(worldGrid, -1, 1) || dug
       } else if (movingRight) {
-        this.digAt(worldGrid, 1, 0)
-        this.digAt(worldGrid, 1, 1)
+        dug = this.digAt(worldGrid, 1, 0) || dug
+        dug = this.digAt(worldGrid, 1, 1) || dug
       } else {
-        this.digAt(worldGrid, 0, 1)
-        this.digAt(worldGrid, 0, 2)
+        dug = this.digAt(worldGrid, 0, 1) || dug
+        dug = this.digAt(worldGrid, 0, 2) || dug
       }
+      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.1)
     }
     // Up digs upward (critical for escaping underground)
     if (wantsJump && time - this.lastDigTime > DIG_RATE) {
       this.lastDigTime = time
-      this.digAt(worldGrid, 0, -1)
-      this.digAt(worldGrid, 0, -2)
-      if (movingLeft) this.digAt(worldGrid, -1, -1)
-      if (movingRight) this.digAt(worldGrid, 1, -1)
+      let dug = false
+      dug = this.digAt(worldGrid, 0, -1) || dug
+      dug = this.digAt(worldGrid, 0, -2) || dug
+      if (movingLeft) dug = this.digAt(worldGrid, -1, -1) || dug
+      if (movingRight) dug = this.digAt(worldGrid, 1, -1) || dug
+      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.1)
     }
 
     // Auto-dig when walking into walls
@@ -212,17 +217,17 @@ export default class God {
 
   // Dig relative to the god's position: dx/dy in tile offsets
   digAt(worldGrid, dx, dy) {
-    if (!worldGrid) return
+    if (!worldGrid) return false
     const baseTileX = Math.floor(this.sprite.x / TILE_SIZE)
     const baseTileY = Math.floor((this.sprite.y - TILE_SIZE / 2) / TILE_SIZE)
     const tileX = ((baseTileX + dx) % worldGrid.width + worldGrid.width) % worldGrid.width
     const tileY = baseTileY + dy
-    if (tileY < 0 || tileY >= worldGrid.height) return
+    if (tileY < 0 || tileY >= worldGrid.height) return false
 
     const idx = tileY * worldGrid.width + tileX
     const tile = worldGrid.grid[idx]
-    if (tile === TILES.BEDROCK || tile === TILES.AIR) return
-    if (LIQUID_TILES.has(tile)) return
+    if (tile === TILES.BEDROCK || tile === TILES.AIR) return false
+    if (LIQUID_TILES.has(tile)) return false
 
     worldGrid.grid[idx] = TILES.AIR
     if (worldGrid.layer) {
@@ -237,6 +242,7 @@ export default class God {
       }
     }
     this.spawnDebris(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2)
+    return true
   }
 
   spawnDebris(x, y) {

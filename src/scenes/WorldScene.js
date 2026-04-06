@@ -12,6 +12,7 @@ import ParallaxSky from '../ui/ParallaxSky.js'
 import CritterManager from '../world/Critters.js'
 import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
+import GridSimulator from '../world/GridSimulator.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -185,6 +186,9 @@ export default class WorldScene extends Phaser.Scene {
     // Cosmetic ambient particles (embers, leaves, mist, fireflies, etc.)
     this.particles = new ParticleEngine(this, params, this.worldGrid, worldData.surfaceHeights)
 
+    // Grid Sand Simulator
+    this.gridSimulator = new GridSimulator(this, this.worldGrid)
+
     // HUD
     this.createHUD(params)
 
@@ -218,6 +222,20 @@ export default class WorldScene extends Phaser.Scene {
     this._prevFlapTime = 0
     this._lastStepSound = 0
     this._prevInLiquid = false
+
+    // Camera FX state
+    this.trauma = 0
+    this.timeDilation = 1.0
+    this.targetTimeDilation = 1.0
+  }
+
+  addTrauma(amount) {
+    this.trauma = Math.min(this.trauma + amount, 1.0)
+  }
+
+  triggerSlowmo(target = 0.2) {
+    this.timeDilation = target
+    this.targetTimeDilation = 1.0
   }
 
   createHUD(params) {
@@ -321,6 +339,10 @@ export default class WorldScene extends Phaser.Scene {
       this.hintText.setText('Visit villages to spread this knowledge')
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
+
+      this.addTrauma(0.8)
+      this.triggerSlowmo(0.1)
+      if (this.ambience) this.ambience.playMagic()
     }
   }
 
@@ -338,6 +360,7 @@ export default class WorldScene extends Phaser.Scene {
     newTablets.forEach((tablet, i) => {
       this.time.delayedCall(i * 1000, () => {
         if (village.receiveTablet(tablet)) {
+          if (this.ambience) this.ambience.playGong()
           this.showMessage(
             `${village.name} learns tablet ${tablet.stage}!`,
             900
@@ -363,6 +386,27 @@ export default class WorldScene extends Phaser.Scene {
 
   update(time, delta) {
     if (!this.worldReady) return
+
+    // Screen Shake & Time Dilation
+    const step = delta / 1000
+    this.timeDilation += (this.targetTimeDilation - this.timeDilation) * 1.5 * step
+    
+    // Safety clamp in case of lag spikes
+    this.timeDilation = Math.max(0.1, Math.min(1.0, this.timeDilation))
+    this.physics.world.timeScale = 1.0 / this.timeDilation
+    const dilatedDelta = delta * this.timeDilation
+
+    if (this.trauma > 0) {
+      this.trauma = Math.max(0, this.trauma - 0.8 * step)
+      const shake = this.trauma * this.trauma
+      const shakeScale = 20
+      this.cameras.main.setFollowOffset(
+        (Math.random() - 0.5) * shake * shakeScale,
+        (Math.random() - 0.5) * shake * shakeScale
+      )
+    } else {
+      this.cameras.main.setFollowOffset(0, 0)
+    }
 
     // God movement
     this.god.update(this.worldGrid, time)
@@ -394,9 +438,9 @@ export default class WorldScene extends Phaser.Scene {
       const dx = this.god.sprite.x - village.worldX
       const dy = this.god.sprite.y - village.worldY
       const dist = Math.sqrt(dx * dx + dy * dy)
-      village.updateBelief(dist, delta)
-      village.updatePopulation(delta)
-      village.updateVillagers(delta)
+      village.updateBelief(dist, dilatedDelta)
+      village.updatePopulation(dilatedDelta)
+      village.updateVillagers(dilatedDelta)
     }
 
     // Population HUD (only redraw when the number changes)
@@ -411,10 +455,24 @@ export default class WorldScene extends Phaser.Scene {
     }
 
     // Critter AI
-    if (this.critters) this.critters.update(delta)
+    if (this.critters) this.critters.update(dilatedDelta)
 
     // Ambient particles
-    if (this.particles) this.particles.update(delta, this.god.sprite, this.dayTime)
+    if (this.particles) this.particles.update(dilatedDelta, this.god.sprite, this.dayTime)
+    
+    // Parallax
+    if (this.parallaxSky) this.parallaxSky.update(dilatedDelta)
+
+    // Active Chunk for Grid Simulator
+    const cam = this.cameras.main
+    const viewPad = 15 // tiles padding outside view
+    const activeRect = {
+      x: Math.floor(cam.scrollX / TILE_SIZE) - viewPad,
+      y: Math.floor(cam.scrollY / TILE_SIZE) - viewPad,
+      w: Math.ceil(cam.width / TILE_SIZE) + viewPad * 2,
+      h: Math.ceil(cam.height / TILE_SIZE) + viewPad * 2
+    }
+    if (this.gridSimulator) this.gridSimulator.update(time, dilatedDelta, activeRect)
 
     // Minimap
     if (this.minimap) this.minimap.update(this.god.sprite)

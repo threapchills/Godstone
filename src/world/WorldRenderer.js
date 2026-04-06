@@ -4,8 +4,7 @@ import { TILES, buildPalette } from './TileTypes.js'
 // Padding columns on each side for seamless horizontal wrapping
 export const WRAP_PAD = Math.ceil(GAME_WIDTH / TILE_SIZE / 2) + 8
 
-// Generate a tileset texture at runtime from the element palette.
-// Each tile type gets one TILE_SIZE x TILE_SIZE coloured square with subtle variation.
+// Generate a tileset texture at runtime from the element palette and skybaby assets.
 export function createTilesetTexture(scene, params) {
   const palette = buildPalette(params.element1, params.element2, params.elementRatio)
   const tileCount = 52 // enough IDs to cover all tile types including markers
@@ -17,27 +16,47 @@ export function createTilesetTexture(scene, params) {
   canvas.width = texWidth
   canvas.height = texHeight
   const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingEnabled = true // Allow smooth downscaling of massive skybaby assets
 
-  // Draw each tile type as a coloured block with slight pixel noise
+  const texTileset = scene.textures.get('sb_tileset')?.getSourceImage()
+  const texTree = scene.textures.get('sb_tree')?.getSourceImage()
+  const texGrass = scene.textures.get('sb_grass')?.getSourceImage()
+
   for (let tileId = 0; tileId < tileCount; tileId++) {
     const colour = palette[tileId]
     if (colour == null) continue // air is transparent
+    
+    const px = tileId * TILE_SIZE
+    ctx.save()
 
+    // Pick sprite based on tile type
+    if (tileId === TILES.TREE_LEAVES || tileId === TILES.TREE_TRUNK || tileId === TILES.MUSHROOM) {
+      if (texTree) ctx.drawImage(texTree, px, 0, TILE_SIZE, TILE_SIZE)
+      else ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
+    } else if (tileId === TILES.TALL_GRASS || tileId === TILES.BUSH) {
+      if (texGrass) ctx.drawImage(texGrass, px, 0, TILE_SIZE, TILE_SIZE)
+      else ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
+    } else {
+      // Ground, liquids, solids -> use parts of the tileset
+      if (texTileset) {
+        let sliceW = Math.floor(texTileset.width / 3)
+        // Pick left, mid, or right randomly to vary blocks
+        const sx = Math.floor(Math.random() * 3) * sliceW
+        ctx.drawImage(texTileset, sx, 0, sliceW, texTileset.height, px, 0, TILE_SIZE, TILE_SIZE)
+      } else {
+        ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
+      }
+    }
+
+    // Apply procedural hue shift by drawing a colored rectangle over it with 'multiply' blend mode
+    ctx.globalCompositeOperation = 'multiply'
     const baseR = (colour >> 16) & 0xff
     const baseG = (colour >> 8) & 0xff
     const baseB = colour & 0xff
+    ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`
+    ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
 
-    for (let py = 0; py < TILE_SIZE; py++) {
-      for (let px = 0; px < TILE_SIZE; px++) {
-        // Subtle per-pixel variation for texture
-        const variation = (Math.random() - 0.5) * 16
-        const r = Math.max(0, Math.min(255, baseR + variation))
-        const g = Math.max(0, Math.min(255, baseG + variation))
-        const b = Math.max(0, Math.min(255, baseB + variation))
-        ctx.fillStyle = `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`
-        ctx.fillRect(tileId * TILE_SIZE + px, py, 1, 1)
-      }
-    }
+    ctx.restore()
   }
 
   // Add the texture to Phaser

@@ -1,0 +1,4 @@
+  |-- /backgrounds    // Parallax layers
+|       |-- sky_layer_1.png (Furthest/Slowest)
+|       |-- sky_layer_2.png (Mid)
+|       |-- clouds_fg.png   (Closest/Fastest)

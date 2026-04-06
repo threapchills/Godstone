@@ -95,7 +95,8 @@ export default class AmbienceEngine {
 
     this._buildMasterChain()
     this._buildChannels()
-    this._noiseBuffer = this._createNoiseBuffer(1)
+    this._noiseBuffer = this._createNoiseBuffer(1)       // short: for transient one-shots
+    this._longNoiseBuffer = this._createNoiseBuffer(8)  // long: for continuous looped layers
     this._initZones()
     this._initCavernLayer()
     this._initBirdsong()
@@ -105,7 +106,19 @@ export default class AmbienceEngine {
     this._initWaterLayer()
     await this._loadCoreSounds()
     this._loadRemainingSounds() // fire-and-forget
+    this._loadOneShots()
     this.initialized = true
+  }
+
+  async _loadOneShots() {
+    this.oneShots = { magic: [], gong: null }
+    try {
+      this.oneShots.gong = await this._fetchBuffer('teepee.ogg')
+      for (let i = 1; i <= 4; i++) {
+        const buf = await this._fetchBuffer(`spell${i}.wav`)
+        if (buf) this.oneShots.magic.push(buf)
+      }
+    } catch {}
   }
 
   // --- Master output chain (EQ + limiter) ---
@@ -409,6 +422,37 @@ export default class AmbienceEngine {
   //  PUBLIC API
   // ============================================================
 
+  playMagic() {
+    if (!this.initialized || !this.oneShots?.magic?.length) return
+    const ac = this.ctx
+    const buf = this.oneShots.magic[Math.floor(Math.random() * this.oneShots.magic.length)]
+    if (!buf || !buf.buffer) return
+
+    const src = ac.createBufferSource()
+    src.buffer = buf.buffer
+    // Procedural pitch variance
+    src.playbackRate.value = 0.8 + Math.random() * 0.4
+    
+    // Connect to procedural gain which handles wet/dry reverb procedurally based on zones
+    const gain = ac.createGain()
+    gain.gain.value = buf.pregain * 1.5
+    src.connect(gain).connect(this.proceduralGain)
+    src.start()
+  }
+
+  playGong() {
+    if (!this.initialized || !this.oneShots?.gong?.buffer) return
+    const ac = this.ctx
+    const src = ac.createBufferSource()
+    src.buffer = this.oneShots.gong.buffer
+    src.playbackRate.value = 0.9 + Math.random() * 0.2
+    
+    const gain = ac.createGain()
+    gain.gain.value = this.oneShots.gong.pregain * 2.0
+    src.connect(gain).connect(this.proceduralGain)
+    src.start()
+  }
+
   // Call once when the world is created. Picks sounds and sets volumes
   // based on element pair, ratio, and seed.
   setWorld(params) {
@@ -657,7 +701,7 @@ export default class AmbienceEngine {
 
     // Wind-through-tunnels: filtered noise bed
     const windSrc = ac.createBufferSource()
-    windSrc.buffer = this._noiseBuffer
+    windSrc.buffer = this._longNoiseBuffer
     windSrc.loop = true
     const windBp = ac.createBiquadFilter()
     windBp.type = 'bandpass'
@@ -694,14 +738,14 @@ export default class AmbienceEngine {
     const depth = this.zones.depth
 
     // Drone: swells with cavern weight, pitch drops with depth
-    this._cavern.droneGain.gain.setTargetAtTime(cavern * 0.3, now, 0.5)
+    this._cavern.droneGain.gain.setTargetAtTime(cavern * 0.18, now, 0.5)
     const droneFreq = 55 - depth * 20 // 55Hz surface → 35Hz deep
     this._cavern.drone1.frequency.setTargetAtTime(droneFreq, now, 1.0)
     this._cavern.drone2.frequency.setTargetAtTime(droneFreq + 0.5, now, 1.0)
     this._cavern.droneLp.frequency.setTargetAtTime(120 + (1 - depth) * 180, now, 0.5)
 
-    // Cave wind: audible in caves, narrower + quieter deeper
-    this._cavern.windGain.gain.setTargetAtTime(cavern * 0.15, now, 0.4)
+    // Cave wind: subtle breath, not howl
+    this._cavern.windGain.gain.setTargetAtTime(cavern * 0.08, now, 0.4)
     this._cavern.windBp.frequency.setTargetAtTime(200 + (1 - depth) * 300, now, 0.5)
   }
 
@@ -1063,7 +1107,7 @@ export default class AmbienceEngine {
 
     // Filtered noise for indistinct murmur
     const noiseSrc = ac.createBufferSource()
-    noiseSrc.buffer = this._noiseBuffer
+    noiseSrc.buffer = this._longNoiseBuffer
     noiseSrc.loop = true
     const bp = ac.createBiquadFilter()
     bp.type = 'bandpass'
@@ -1079,7 +1123,7 @@ export default class AmbienceEngine {
 
     // Campfire crackle for stage 2+
     const fireSrc = ac.createBufferSource()
-    fireSrc.buffer = this._noiseBuffer
+    fireSrc.buffer = this._longNoiseBuffer
     fireSrc.loop = true
     const fireBP = ac.createBiquadFilter()
     fireBP.type = 'bandpass'
@@ -1148,18 +1192,19 @@ export default class AmbienceEngine {
 
     // Continuous water lapping: modulated filtered noise
     const lapSrc = ac.createBufferSource()
-    lapSrc.buffer = this._noiseBuffer
+    lapSrc.buffer = this._longNoiseBuffer
     lapSrc.loop = true
     const lapBp = ac.createBiquadFilter()
     lapBp.type = 'bandpass'
     lapBp.frequency.value = 400
     lapBp.Q.value = 1.5
 
-    // Slow amplitude modulation for wave-like rhythm
+    // Slow amplitude modulation for wave-like rhythm; very slow so it
+    // reads as tidal drift rather than a metronome
     const lapLFO = ac.createOscillator()
-    lapLFO.frequency.value = 0.3 + Math.random() * 0.2
+    lapLFO.frequency.value = 0.08 + Math.random() * 0.06
     const lapLFOGain = ac.createGain()
-    lapLFOGain.gain.value = 0.5
+    lapLFOGain.gain.value = 0.3
     lapLFO.connect(lapLFOGain)
 
     const lapGain = ac.createGain()
@@ -1168,7 +1213,7 @@ export default class AmbienceEngine {
 
     // Higher bubbling bed: resonant filtered noise
     const bubbleSrc = ac.createBufferSource()
-    bubbleSrc.buffer = this._noiseBuffer
+    bubbleSrc.buffer = this._longNoiseBuffer
     bubbleSrc.loop = true
     const bubbleBp = ac.createBiquadFilter()
     bubbleBp.type = 'bandpass'
@@ -1223,10 +1268,10 @@ export default class AmbienceEngine {
     const now = this.ctx.currentTime
     const water = this.zones.water
 
-    // Lapping: grows with water proximity
-    this._water.lapGain.gain.setTargetAtTime(water * 0.2, now, 0.4)
-    // Bubbling: needs higher water zone weight
-    this._water.bubbleGain.gain.setTargetAtTime(Math.max(0, water - 0.2) * 0.15, now, 0.3)
+    // Lapping: subtle wash; lower gain to sit behind pads
+    this._water.lapGain.gain.setTargetAtTime(water * 0.1, now, 0.6)
+    // Bubbling: only when very close to water
+    this._water.bubbleGain.gain.setTargetAtTime(Math.max(0, water - 0.3) * 0.08, now, 0.4)
   }
 
   // Toggle submerged lowpass filter based on god's liquid state
