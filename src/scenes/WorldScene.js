@@ -543,8 +543,8 @@ export default class WorldScene extends Phaser.Scene {
     // Foliage update (wind sway + destroy burned trees)
     if (this.foliageRenderer) this.foliageRenderer.update(dilatedDelta)
 
-    // Minimap
-    if (this.minimap) this.minimap.update(this.god.sprite)
+    // Minimap (delta lets it throttle the live texture refresh)
+    if (this.minimap) this.minimap.update(this.god.sprite, dilatedDelta)
 
     // HUD
     const tileX = Math.floor(this.god.sprite.x / TILE_SIZE)
