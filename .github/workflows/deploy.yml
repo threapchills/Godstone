@@ -10,11 +10,14 @@ permissions:
   pages: write
   id-token: write
 
-# Only one deployment at a time; don't cancel in-progress so a mid-deploy
-# push doesn't leave the site in a broken state.
+# Only one deployment at a time. Cancel any queued or in-progress runs
+# in favour of the newest push: deploy-pages does an atomic swap of the
+# Pages artifact, so a half-finished cancelled run can't leave the site
+# broken, and queueing instead caused a stuck run to block every later
+# deploy in the chain.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
