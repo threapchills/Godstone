@@ -68,6 +68,7 @@ export default class WorldScene extends Phaser.Scene {
       height: WORLD_HEIGHT,
       layer: layer,
       padOffset: WRAP_PAD,
+      surfaceHeights: worldData.surfaceHeights,
     }
 
     // Seeded RNG for entity placement
@@ -430,6 +431,13 @@ export default class WorldScene extends Phaser.Scene {
     if (this.ambience?.initialized) {
       this.ambience.setTimeOfDay(this.dayTime)
       this.ambience.setDepth(tileY / WORLD_HEIGHT)
+      this.ambience.updateZones(this.worldGrid, tileX, tileY)
+
+      // Birdsong: melodic calls near trees
+      this.ambience.updateBirdsong()
+
+      // Cavern drips: stochastic water drops underground
+      this.ambience.updateCavernDrips()
 
       // Critter sounds: panned one-shots from nearby wildlife
       if (this.critters) {
@@ -440,6 +448,9 @@ export default class WorldScene extends Phaser.Scene {
 
       // Village proximity: ambient murmur near settlements
       this.ambience.updateVillageProximity(this.villages, this.god.sprite.x, this.god.sprite.y)
+
+      // Villager chatter: animalese babble near settlements
+      this.ambience.updateVillagerChatter(this.villages, this.god.sprite.x, this.god.sprite.y)
 
       // God movement: dig crunch
       if (this.god.lastDigTime !== this._prevDigTime) {
@@ -462,9 +473,10 @@ export default class WorldScene extends Phaser.Scene {
           this.ambience.playStep(tile)
         }
       }
-      // God movement: splash on entering water
+      // God movement: splash on entering water + submerge filter
       if (this.god.isInLiquid !== this._prevInLiquid) {
         if (this.god.isInLiquid) this.ambience.playSplash()
+        this.ambience.setSubmerged(this.god.isInLiquid)
         this._prevInLiquid = this.god.isInLiquid
       }
     }

@@ -96,8 +96,13 @@ export default class AmbienceEngine {
     this._buildMasterChain()
     this._buildChannels()
     this._noiseBuffer = this._createNoiseBuffer(1)
+    this._initZones()
+    this._initCavernLayer()
+    this._initBirdsong()
     this._initCritterLayer()
     this._initVillageLayer()
+    this._initVillagerChatter()
+    this._initWaterLayer()
     await this._loadCoreSounds()
     this._loadRemainingSounds() // fire-and-forget
     this.initialized = true
@@ -131,7 +136,109 @@ export default class AmbienceEngine {
     // pad-level attenuation (0.133). Feeds the same limiter for safety.
     this.proceduralGain = ac.createGain()
     this.proceduralGain.gain.value = 0.55
-    this.proceduralGain.connect(limiter)
+
+    // Reverb bus: wet/dry split driven by cavern zone weight.
+    // Dry path goes straight to limiter; wet path goes through convolver.
+    this._reverbDry = ac.createGain()
+    this._reverbDry.gain.value = 1.0
+    this._reverbWet = ac.createGain()
+    this._reverbWet.gain.value = 0.0
+    this._convolver = ac.createConvolver()
+    // Pre-delay + dampening on the wet signal
+    this._reverbPreDelay = ac.createDelay(0.1)
+    this._reverbPreDelay.delayTime.value = 0.02
+    this._reverbDamp = ac.createBiquadFilter()
+    this._reverbDamp.type = 'lowpass'
+    this._reverbDamp.frequency.value = 4000
+    this._reverbDamp.Q.value = 0.5
+
+    this.proceduralGain.connect(this._reverbDry)
+    this.proceduralGain.connect(this._reverbPreDelay)
+    this._reverbPreDelay.connect(this._convolver)
+    this._convolver.connect(this._reverbDamp)
+    this._reverbDamp.connect(this._reverbWet)
+    this._reverbDry.connect(limiter)
+    this._reverbWet.connect(limiter)
+
+    // Also route ambient pads through the reverb for cave immersion
+    this._padReverbSend = ac.createGain()
+    this._padReverbSend.gain.value = 0.0
+    high.connect(this._padReverbSend)
+    this._padReverbSend.connect(this._reverbPreDelay)
+
+    // Generate initial impulse response (short surface room)
+    this._setReverbIR(0.4, 3000)
+    this._lastIRCavern = 0
+  }
+
+  // Procedurally generate a reverb impulse response.
+  // duration: seconds (0.2 for tight room, 2.5 for deep cave)
+  // damping: Hz cutoff for high-freq decay (lower = darker reverb)
+  _setReverbIR(duration, damping) {
+    const ac = this.ctx
+    const rate = ac.sampleRate
+    const length = Math.floor(rate * duration)
+    const buffer = ac.createBuffer(2, length, rate)
+
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch)
+      for (let i = 0; i < length; i++) {
+        const t = i / rate
+        // Exponential decay with early reflection clusters
+        const decay = Math.exp(-t * (3.5 / duration))
+        // Sparse early reflections (first 60ms)
+        const early = t < 0.06 ? (Math.random() > 0.85 ? 1.5 : 0.3) : 1.0
+        // Diffuse tail with slight modulation for richness
+        const noise = (Math.random() * 2 - 1) * decay * early
+        // Simple damping: reduce amplitude of high-freq energy over time
+        // by smoothing samples (1-pole lowpass approximation)
+        data[i] = noise
+      }
+
+      // Apply damping via simple 1-pole lowpass in-place
+      const coeff = Math.exp(-2 * Math.PI * damping / rate)
+      let prev = 0
+      for (let i = 0; i < length; i++) {
+        prev = data[i] = data[i] * (1 - coeff) + prev * coeff
+      }
+    }
+
+    this._convolver.buffer = buffer
+  }
+
+  // Called from updateZones lerp; morphs reverb character with depth.
+  // Regenerates IR only when cavern weight crosses thresholds (expensive).
+  _updateReverb() {
+    if (!this._convolver) return
+    const now = this.ctx.currentTime
+    const cavern = this.zones.cavern
+    const depth = this.zones.depth
+
+    // Wet/dry mix: more cave = more reverb
+    const wetLevel = Math.min(0.7, cavern * 0.85)
+    this._reverbWet.gain.setTargetAtTime(wetLevel, now, 0.4)
+    this._reverbDry.gain.setTargetAtTime(1.0 - wetLevel * 0.3, now, 0.4)
+
+    // Also send ambient pads through reverb when in caves
+    this._padReverbSend.gain.setTargetAtTime(cavern * 0.4, now, 0.5)
+
+    // Regenerate IR when cavern zone changes significantly (costly, so threshold)
+    const cavernBucket = Math.floor(cavern * 4) // 5 tiers: 0, 0.25, 0.5, 0.75, 1.0
+    if (cavernBucket !== this._lastIRCavern) {
+      this._lastIRCavern = cavernBucket
+      // Deeper = longer tail, darker
+      const duration = 0.4 + cavern * 2.0  // 0.4s surface → 2.4s deep cave
+      const damping = 3000 - cavern * 2000  // 3kHz surface → 1kHz deep
+      this._setReverbIR(duration, damping)
+    }
+
+    // Tighten pre-delay and damping with depth for tube-like resonance
+    this._reverbPreDelay.delayTime.setTargetAtTime(
+      0.02 + depth * 0.04, now, 0.3 // 20ms surface → 60ms deep
+    )
+    this._reverbDamp.frequency.setTargetAtTime(
+      4000 - depth * 2500, now, 0.5 // 4kHz surface → 1.5kHz deep
+    )
   }
 
   // --- Per-element channels ---
@@ -246,10 +353,13 @@ export default class AmbienceEngine {
     const now = ac.currentTime
 
     const srcA = ac.createBufferSource(); srcA.buffer = metaA.buffer; srcA.loop = true
+    // Subtle pitch variance on each source for organic feel (±3%)
+    srcA.playbackRate.value = 1 + (Math.random() - 0.5) * 0.06
     const preA = ac.createGain(); preA.gain.value = metaA.pregain
     const crossA = ac.createGain(); crossA.gain.value = 1
 
     const srcB = ac.createBufferSource(); srcB.buffer = metaB.buffer; srcB.loop = true
+    srcB.playbackRate.value = 1 + (Math.random() - 0.5) * 0.06
     const preB = ac.createGain(); preB.gain.value = metaB.pregain
     const crossB = ac.createGain(); crossB.gain.value = 0
 
@@ -325,6 +435,12 @@ export default class AmbienceEngine {
       ch.baseVolume = vol
       ch.gain.gain.setTargetAtTime(vol * vol, this.ctx.currentTime, 0.8)
     }
+
+    // Generate per-world bird species, critter voicings, and villager babble
+    const seed = params.seed || 12345
+    this._generateBirdSpecies(seed, el1, el2)
+    this._generateCritterVoices(seed, el1, el2)
+    this._generateVillagerVoice(seed, el1, el2)
   }
 
   // t: 0..1 where 0 = midnight, 0.5 = noon
@@ -358,6 +474,397 @@ export default class AmbienceEngine {
   }
 
   // ============================================================
+  //  ZONE DETECTION
+  //  Scans tiles around the god to derive spatial zone weights (0-1).
+  //  Throttled to avoid per-frame grid scans; weights smooth-lerp
+  //  toward targets for organic crossfading.
+  // ============================================================
+
+  _initZones() {
+    this.zones = {
+      canopy: 0,     // near trees / forest
+      cavern: 0,     // underground enclosed space
+      water: 0,      // near or in liquid
+      openAir: 0,    // surface, sky above
+      village: 0,    // near settlement (already handled, unified here)
+      depth: 0,      // 0 = surface, 1 = deepest
+    }
+    this._zoneTargets = { ...this.zones }
+    this._lastZoneScan = 0
+  }
+
+  // Called every frame from WorldScene. Throttles the expensive grid
+  // scan to ~4Hz, then lerps current weights toward targets each frame.
+  updateZones(worldGrid, godTileX, godTileY) {
+    if (!this.initialized) return
+    const now = performance.now()
+
+    // Full scan every 250ms
+    if (now - this._lastZoneScan > 250) {
+      this._lastZoneScan = now
+      this._scanZones(worldGrid, godTileX, godTileY)
+    }
+
+    // Smooth lerp toward targets (~6dB/s transition)
+    const lerpRate = 0.08
+    for (const key of Object.keys(this.zones)) {
+      this.zones[key] += (this._zoneTargets[key] - this.zones[key]) * lerpRate
+    }
+
+    // Drive reverb, cavern, and water ambience from zone weights
+    this._updateReverb()
+    this._updateCavernLayer()
+    this._updateWaterLayer()
+  }
+
+  _scanZones(worldGrid, gx, gy) {
+    const { grid, width, height, surfaceHeights } = worldGrid
+    if (!grid || !surfaceHeights) return
+
+    const R = 15 // scan radius in tiles
+    let treeTiles = 0
+    let liquidTiles = 0
+    let airTiles = 0
+    let solidTiles = 0
+    let totalScanned = 0
+
+    for (let dy = -R; dy <= R; dy++) {
+      const y = gy + dy
+      if (y < 0 || y >= height) continue
+      for (let dx = -R; dx <= R; dx++) {
+        // Circular scan, not square
+        if (dx * dx + dy * dy > R * R) continue
+        const x = ((gx + dx) % width + width) % width
+        const tile = grid[y * width + x]
+        totalScanned++
+
+        if (tile === 16 || tile === 17 || tile === 18 || tile === 19) {
+          treeTiles++ // TREE_TRUNK, TREE_LEAVES, BUSH, TALL_GRASS
+        } else if (tile === 5 || tile === 6 || tile === 13) {
+          liquidTiles++ // WATER, LAVA, DEEP_WATER
+        } else if (tile === 0) {
+          airTiles++
+        } else {
+          solidTiles++
+        }
+      }
+    }
+
+    if (totalScanned === 0) return
+    const inv = 1 / totalScanned
+
+    // Canopy: fraction of vegetation tiles, boosted for saliency
+    this._zoneTargets.canopy = Math.min(1, treeTiles * inv * 8)
+
+    // Water: fraction of liquid tiles, boosted
+    this._zoneTargets.water = Math.min(1, liquidTiles * inv * 6)
+
+    // Cavern: how enclosed is this space? High solid ratio + underground
+    const surfaceY = surfaceHeights[((gx % width) + width) % width] || 0
+    const depthBelow = Math.max(0, gy - surfaceY)
+    const depthNorm = Math.min(1, depthBelow / (height * 0.6))
+    const enclosure = solidTiles * inv // 0-1, how walled-in
+    this._zoneTargets.cavern = Math.min(1, depthNorm * 1.2 + enclosure * 0.5)
+    this._zoneTargets.depth = depthNorm
+
+    // Open air: on or above surface, lots of air, few solids overhead
+    const aboveSurface = gy <= surfaceY + 3 ? 1 : Math.max(0, 1 - depthBelow / 30)
+    const openness = airTiles * inv
+    this._zoneTargets.openAir = aboveSurface * openness
+  }
+
+  // ============================================================
+  //  CAVERN AMBIENCE LAYER
+  //  Continuous drone, stochastic drips, and distant tunnel echoes
+  //  driven by cavern + depth zone weights.
+  // ============================================================
+
+  _initCavernLayer() {
+    const ac = this.ctx
+
+    // Deep resonant drone: two detuned triangle oscillators
+    const drone1 = ac.createOscillator()
+    drone1.type = 'triangle'
+    drone1.frequency.value = 55 // A1
+    const drone2 = ac.createOscillator()
+    drone2.type = 'triangle'
+    drone2.frequency.value = 55.5 // slight detune for beating
+
+    const droneGain = ac.createGain()
+    droneGain.gain.value = 0
+
+    // Subtle LFO modulating drone pitch for organic movement
+    const droneLFO = ac.createOscillator()
+    droneLFO.frequency.value = 0.15
+    const droneLFOGain = ac.createGain()
+    droneLFOGain.gain.value = 0.5
+    droneLFO.connect(droneLFOGain)
+    droneLFOGain.connect(drone1.frequency)
+    droneLFOGain.connect(drone2.frequency)
+    droneLFO.start()
+
+    // Lowpass filter to keep the drone subterranean
+    const droneLp = ac.createBiquadFilter()
+    droneLp.type = 'lowpass'
+    droneLp.frequency.value = 200
+    droneLp.Q.value = 2
+
+    drone1.connect(droneLp)
+    drone2.connect(droneLp)
+    droneLp.connect(droneGain)
+    droneGain.connect(this.proceduralGain)
+    drone1.start()
+    drone2.start()
+
+    // Wind-through-tunnels: filtered noise bed
+    const windSrc = ac.createBufferSource()
+    windSrc.buffer = this._noiseBuffer
+    windSrc.loop = true
+    const windBp = ac.createBiquadFilter()
+    windBp.type = 'bandpass'
+    windBp.frequency.value = 300
+    windBp.Q.value = 3
+    const windGain = ac.createGain()
+    windGain.gain.value = 0
+    // Slow modulation of the wind filter frequency
+    const windLFO = ac.createOscillator()
+    windLFO.frequency.value = 0.08
+    const windLFOGain = ac.createGain()
+    windLFOGain.gain.value = 100
+    windLFO.connect(windLFOGain)
+    windLFOGain.connect(windBp.frequency)
+    windLFO.start()
+
+    windSrc.connect(windBp).connect(windGain)
+    windGain.connect(this.proceduralGain)
+    windSrc.start()
+
+    this._cavern = {
+      drone1, drone2, droneGain, droneLp, droneLFO,
+      windSrc, windBp, windGain, windLFO,
+    }
+    this._cavernDripTime = 0
+    this._cavernDripDelay = 2
+  }
+
+  // Called from the zone update loop to modulate cavern layer gains
+  _updateCavernLayer() {
+    if (!this._cavern) return
+    const now = this.ctx.currentTime
+    const cavern = this.zones.cavern
+    const depth = this.zones.depth
+
+    // Drone: swells with cavern weight, pitch drops with depth
+    this._cavern.droneGain.gain.setTargetAtTime(cavern * 0.3, now, 0.5)
+    const droneFreq = 55 - depth * 20 // 55Hz surface → 35Hz deep
+    this._cavern.drone1.frequency.setTargetAtTime(droneFreq, now, 1.0)
+    this._cavern.drone2.frequency.setTargetAtTime(droneFreq + 0.5, now, 1.0)
+    this._cavern.droneLp.frequency.setTargetAtTime(120 + (1 - depth) * 180, now, 0.5)
+
+    // Cave wind: audible in caves, narrower + quieter deeper
+    this._cavern.windGain.gain.setTargetAtTime(cavern * 0.15, now, 0.4)
+    this._cavern.windBp.frequency.setTargetAtTime(200 + (1 - depth) * 300, now, 0.5)
+  }
+
+  // Stochastic drip sounds: random pitched water drops
+  updateCavernDrips() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const cavern = this.zones.cavern
+    if (cavern < 0.1) return
+
+    const now = this.ctx.currentTime
+    if (now - this._cavernDripTime < this._cavernDripDelay) return
+
+    this._cavernDripTime = now
+    // More frequent drips deeper in caves (0.5-4s)
+    this._cavernDripDelay = 0.5 + (1 - cavern) * 3.5 + Math.random() * 2
+
+    const ac = this.ctx
+    const pan = (Math.random() - 0.5) * 1.8
+    const panner = ac.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, pan))
+
+    // Resonant drip: sine ping with fast decay
+    const freq = 800 + Math.random() * 2000
+    const osc = ac.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(freq, now)
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + 0.15)
+
+    const env = ac.createGain()
+    const vol = 0.15 + cavern * 0.25
+    env.gain.setValueAtTime(vol, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.1 + Math.random() * 0.15)
+
+    osc.connect(env).connect(panner).connect(this.proceduralGain)
+    osc.start(now)
+    osc.stop(now + 0.3)
+
+    // Occasional second drip echo (delayed, quieter)
+    if (Math.random() < 0.4) {
+      const delay = 0.08 + Math.random() * 0.12
+      const osc2 = ac.createOscillator()
+      osc2.type = 'sine'
+      osc2.frequency.setValueAtTime(freq * (0.9 + Math.random() * 0.2), now + delay)
+      const env2 = ac.createGain()
+      env2.gain.setValueAtTime(0, now)
+      env2.gain.setValueAtTime(vol * 0.4, now + delay)
+      env2.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.12)
+      osc2.connect(env2).connect(panner)
+      osc2.start(now + delay)
+      osc2.stop(now + delay + 0.2)
+    }
+  }
+
+  // ============================================================
+  //  BIRDSONG LAYER
+  //  Seeded melodic calls that play when canopy zone weight is high.
+  //  Each world gets unique bird "species" derived from seed + elements.
+  // ============================================================
+
+  _initBirdsong() {
+    this._birdLastTime = 0
+    this._birdNextDelay = 1
+    this._birdSpecies = null // generated on setWorld
+  }
+
+  // Build per-world bird species from seed. Each species has a call
+  // pattern (note sequence), base pitch, timbre, and rhythm.
+  _generateBirdSpecies(seed, element1, element2) {
+    const rng = mulberry32(seed + 77777)
+    const count = 2 + Math.floor(rng() * 3) // 2-4 species per world
+    const species = []
+
+    // Element influences timbre: fire = sawtooth/harsh, water = sine/pure,
+    // air = triangle/airy, earth = square/woody
+    const waveMap = { fire: 'sawtooth', water: 'sine', air: 'triangle', earth: 'square' }
+    const primaryWave = waveMap[element1] || 'sine'
+    const secondaryWave = waveMap[element2] || 'triangle'
+
+    for (let i = 0; i < count; i++) {
+      const wave = rng() > 0.5 ? primaryWave : secondaryWave
+      // Pentatonic base so calls sound melodic, not random
+      const pentatonic = [0, 2, 4, 7, 9, 12, 14, 16]
+      const baseNote = 72 + Math.floor(rng() * 12) // MIDI 72-83 (C5-B5)
+
+      // Generate a 2-6 note call pattern
+      const noteCount = 2 + Math.floor(rng() * 5)
+      const notes = []
+      for (let n = 0; n < noteCount; n++) {
+        const interval = pentatonic[Math.floor(rng() * pentatonic.length)]
+        notes.push(baseNote + interval - 7) // centre around base
+      }
+
+      // Rhythm: note durations in ms
+      const tempoBase = 60 + rng() * 100 // ms per note (fast trill to slow call)
+      const durations = notes.map(() => tempoBase * (0.5 + rng()))
+
+      // Call style affects envelope
+      const style = rng() < 0.3 ? 'trill' : rng() < 0.6 ? 'whistle' : 'chirp'
+
+      species.push({
+        wave,
+        notes,
+        durations,
+        style,
+        vibrato: 2 + rng() * 8, // Hz
+        vibratoDepth: 5 + rng() * 20, // cents
+        volume: 0.3 + rng() * 0.4,
+      })
+    }
+
+    this._birdSpecies = species
+  }
+
+  // Stochastic birdsong triggered by canopy zone weight
+  updateBirdsong() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    if (!this._birdSpecies || this._birdSpecies.length === 0) return
+
+    const canopy = this.zones.canopy
+    if (canopy < 0.02) return // no trees nearby
+
+    const now = this.ctx.currentTime
+    if (now - this._birdLastTime < this._birdNextDelay) return
+
+    this._birdLastTime = now
+    // Higher canopy = more frequent calls (1-6s range)
+    this._birdNextDelay = 1 + (1 - canopy) * 5 + Math.random() * 3
+
+    // Pick a random species and play its call
+    const sp = this._birdSpecies[Math.floor(Math.random() * this._birdSpecies.length)]
+    this._playBirdCall(sp, canopy)
+  }
+
+  _playBirdCall(species, canopyWeight) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const pan = (Math.random() - 0.5) * 1.6 // wide stereo field
+
+    const panner = ac.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, pan))
+
+    const callGain = ac.createGain()
+    callGain.gain.value = 0
+    callGain.connect(panner)
+    panner.connect(this.proceduralGain)
+
+    let t = now
+    for (let i = 0; i < species.notes.length; i++) {
+      const midi = species.notes[i]
+      const freq = 440 * Math.pow(2, (midi - 69) / 12)
+      const dur = species.durations[i] / 1000 // ms → s
+      const vol = species.volume * canopyWeight
+
+      const osc = ac.createOscillator()
+      osc.type = species.wave
+      osc.frequency.setValueAtTime(freq, t)
+
+      // Vibrato for organic warble
+      const vib = ac.createOscillator()
+      vib.frequency.value = species.vibrato
+      const vibGain = ac.createGain()
+      vibGain.gain.value = species.vibratoDepth * (freq / 1200) // cents to Hz
+      vib.connect(vibGain)
+      vibGain.connect(osc.frequency)
+      vib.start(t)
+      vib.stop(t + dur + 0.05)
+
+      // Per-note envelope
+      const noteEnv = ac.createGain()
+      if (species.style === 'trill') {
+        noteEnv.gain.setValueAtTime(vol, t)
+        noteEnv.gain.setValueAtTime(0, t + dur * 0.8)
+      } else if (species.style === 'whistle') {
+        noteEnv.gain.setValueAtTime(0.001, t)
+        noteEnv.gain.linearRampToValueAtTime(vol, t + dur * 0.15)
+        noteEnv.gain.setValueAtTime(vol, t + dur * 0.7)
+        noteEnv.gain.exponentialRampToValueAtTime(0.001, t + dur)
+      } else {
+        // chirp: sharp attack, fast decay
+        noteEnv.gain.setValueAtTime(vol, t)
+        noteEnv.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.6)
+      }
+
+      osc.connect(noteEnv)
+      noteEnv.connect(callGain)
+      osc.start(t)
+      osc.stop(t + dur + 0.05)
+
+      // Slight pitch slide between notes for naturalism
+      if (i < species.notes.length - 1) {
+        const nextFreq = 440 * Math.pow(2, (species.notes[i + 1] - 69) / 12)
+        osc.frequency.linearRampToValueAtTime(nextFreq, t + dur)
+      }
+
+      t += dur * (0.8 + Math.random() * 0.2) // slight timing variance
+    }
+
+    // Master envelope for the whole call
+    callGain.gain.setValueAtTime(species.volume * canopyWeight, now)
+  }
+
+  // ============================================================
   //  CRITTER SOUND LAYER
   //  Stochastic element-themed one-shots panned to critter positions
   // ============================================================
@@ -373,6 +880,46 @@ export default class AmbienceEngine {
   _initCritterLayer() {
     this._lastCritterTime = 0
     this._nextCritterDelay = 3
+    this._critterVoices = null // generated on setWorld
+  }
+
+  // Build per-world critter voicings: each element's critter gets a
+  // unique sound character derived from the seed. Voices control pitch
+  // range, filter shape, burst pattern, and duration.
+  _generateCritterVoices(seed, element1, element2) {
+    const rng = mulberry32(seed + 55555)
+    const voices = {}
+
+    for (const element of ['fire', 'water', 'air', 'earth']) {
+      // Elements close to the world's pair get richer, louder voices
+      const isPrimary = element === element1 || element === element2
+      const richness = isPrimary ? 1.0 : 0.6
+
+      voices[element] = {
+        // Pitch centre and range (Hz)
+        freqBase: 200 + rng() * 1800,
+        freqRange: 100 + rng() * 800,
+        // Filter character
+        filterQ: 1 + rng() * 6,
+        filterType: rng() < 0.5 ? 'bandpass' : 'highpass',
+        // Temporal pattern
+        burstCount: 1 + Math.floor(rng() * 4),
+        burstSpacing: 0.02 + rng() * 0.06,
+        noteDuration: 0.03 + rng() * 0.15,
+        // Envelope shape
+        attack: 0.002 + rng() * 0.01,
+        decay: 0.03 + rng() * 0.2,
+        // Pitch modulation per burst (creates chirp/warble)
+        pitchSweep: (rng() - 0.5) * 2, // -1 to 1: down-sweep vs up-sweep
+        // Tonal vs noise mix (0 = pure noise, 1 = pure tone)
+        tonality: rng() * 0.8,
+        // Per-play randomization ranges
+        pitchVariance: 0.1 + rng() * 0.3,
+        richness,
+      }
+    }
+
+    this._critterVoices = voices
   }
 
   // Call from the game loop. Picks a random nearby critter and plays
@@ -405,100 +952,66 @@ export default class AmbienceEngine {
     this._nextCritterDelay = 2 + Math.random() * 6
   }
 
+  // Voice-driven critter synth. Uses per-world voice parameters to
+  // generate unique sounds. Each play randomises pitch/timing within
+  // the voice's variance range for organic feel.
   _playCritterOneShot(element, pan, volume) {
     const ac = this.ctx
+    const now = ac.currentTime
     const panner = ac.createStereoPanner()
     panner.pan.value = pan
     panner.connect(this.proceduralGain)
 
-    switch (element) {
-      case 'fire': this._fireCrackle(volume, panner); break
-      case 'water': this._waterDrip(volume, panner); break
-      case 'air': this._airWhistle(volume, panner); break
-      case 'earth': this._earthClick(volume, panner); break
+    // Use seeded voice if available, otherwise fall back to element defaults
+    const voice = this._critterVoices?.[element]
+    if (!voice) return
+
+    const vol = volume * voice.richness
+
+    for (let b = 0; b < voice.burstCount; b++) {
+      const t = now + b * voice.burstSpacing + Math.random() * voice.burstSpacing * 0.3
+
+      // Per-burst pitch randomisation
+      const pitchMod = 1 + (Math.random() - 0.5) * voice.pitchVariance
+      const freq = (voice.freqBase + (Math.random() - 0.5) * voice.freqRange) * pitchMod
+      const endFreq = freq * Math.pow(2, voice.pitchSweep * 0.5) // sweep up or down
+
+      // Mix tonal oscillator with filtered noise based on tonality
+      const burstGain = ac.createGain()
+      burstGain.gain.setValueAtTime(0.001, t)
+      burstGain.gain.linearRampToValueAtTime(vol, t + voice.attack)
+      burstGain.gain.exponentialRampToValueAtTime(0.001, t + voice.attack + voice.decay)
+      burstGain.connect(panner)
+
+      // Tonal component
+      if (voice.tonality > 0.15) {
+        const osc = ac.createOscillator()
+        osc.type = element === 'fire' ? 'sawtooth' : element === 'air' ? 'triangle' : 'sine'
+        osc.frequency.setValueAtTime(freq, t)
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), t + voice.attack + voice.decay)
+        const toneGain = ac.createGain()
+        toneGain.gain.value = voice.tonality
+        osc.connect(toneGain).connect(burstGain)
+        osc.start(t)
+        osc.stop(t + voice.attack + voice.decay + 0.05)
+      }
+
+      // Noise component
+      if (voice.tonality < 0.85) {
+        const src = ac.createBufferSource()
+        src.buffer = this._noiseBuffer
+        const filt = ac.createBiquadFilter()
+        filt.type = voice.filterType
+        filt.frequency.setValueAtTime(freq, t)
+        filt.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), t + voice.attack + voice.decay)
+        filt.Q.value = voice.filterQ
+        const noiseGain = ac.createGain()
+        noiseGain.gain.value = 1 - voice.tonality
+        src.connect(filt).connect(noiseGain).connect(burstGain)
+        src.start(t)
+        src.stop(t + voice.attack + voice.decay + 0.05)
+      }
     }
-  }
-
-  // Rapid micro-bursts of bandpass-filtered noise
-  _fireCrackle(vol, dest) {
-    const ac = this.ctx
-    const now = ac.currentTime
-    const bursts = 2 + Math.floor(Math.random() * 2)
-    for (let i = 0; i < bursts; i++) {
-      const t = now + i * 0.04 + Math.random() * 0.02
-      const src = ac.createBufferSource()
-      src.buffer = this._noiseBuffer
-      const bp = ac.createBiquadFilter()
-      bp.type = 'bandpass'
-      bp.frequency.value = 800 + Math.random() * 2000
-      bp.Q.value = 2 + Math.random() * 3
-      const env = ac.createGain()
-      env.gain.setValueAtTime(0, t)
-      env.gain.linearRampToValueAtTime(vol * (0.5 + Math.random() * 0.5), t + 0.003)
-      env.gain.exponentialRampToValueAtTime(0.001, t + 0.03 + Math.random() * 0.04)
-      src.connect(bp).connect(env).connect(dest)
-      src.start(t)
-      src.stop(t + 0.1)
-    }
-  }
-
-  // Sine sweep downward; the plop of a water droplet
-  _waterDrip(vol, dest) {
-    const ac = this.ctx
-    const now = ac.currentTime
-    const osc = ac.createOscillator()
-    osc.type = 'sine'
-    const f0 = 600 + Math.random() * 600
-    osc.frequency.setValueAtTime(f0, now)
-    osc.frequency.exponentialRampToValueAtTime(f0 * 0.3, now + 0.12)
-    const env = ac.createGain()
-    env.gain.setValueAtTime(vol * 0.8, now)
-    env.gain.exponentialRampToValueAtTime(0.001, now + 0.15)
-    osc.connect(env).connect(dest)
-    osc.start(now)
-    osc.stop(now + 0.2)
-  }
-
-  // High sine with vibrato; moth flutter / wind whistle
-  _airWhistle(vol, dest) {
-    const ac = this.ctx
-    const now = ac.currentTime
-    const osc = ac.createOscillator()
-    osc.type = 'sine'
-    osc.frequency.value = 2000 + Math.random() * 1500
-    const vibrato = ac.createOscillator()
-    vibrato.frequency.value = 4 + Math.random() * 4
-    const vibGain = ac.createGain()
-    vibGain.gain.value = 25 + Math.random() * 20
-    vibrato.connect(vibGain).connect(osc.frequency)
-    const env = ac.createGain()
-    env.gain.setValueAtTime(0, now)
-    env.gain.linearRampToValueAtTime(vol * 0.5, now + 0.08)
-    env.gain.setValueAtTime(vol * 0.5, now + 0.2)
-    env.gain.linearRampToValueAtTime(0, now + 0.4)
-    osc.connect(env).connect(dest)
-    osc.start(now)
-    vibrato.start(now)
-    osc.stop(now + 0.45)
-    vibrato.stop(now + 0.45)
-  }
-
-  // Sharp highpass noise impulse; beetle click / stone tap
-  _earthClick(vol, dest) {
-    const ac = this.ctx
-    const now = ac.currentTime
-    const src = ac.createBufferSource()
-    src.buffer = this._noiseBuffer
-    const hp = ac.createBiquadFilter()
-    hp.type = 'highpass'
-    hp.frequency.value = 1500 + Math.random() * 2500
-    hp.Q.value = 1
-    const env = ac.createGain()
-    env.gain.setValueAtTime(vol * 0.7, now)
-    env.gain.exponentialRampToValueAtTime(0.001, now + 0.015 + Math.random() * 0.01)
-    src.connect(hp).connect(env).connect(dest)
-    src.start(now)
-    src.stop(now + 0.05)
   }
 
   // ============================================================
@@ -583,6 +1096,248 @@ export default class AmbienceEngine {
     this._village.humGain.gain.setTargetAtTime(proximity * (stage / 7) * 0.15, now, 0.5)
     // Campfire: stage 2+
     this._village.fireGain.gain.setTargetAtTime(stage >= 2 ? proximity * 0.2 : 0, now, 0.3)
+  }
+
+  // ============================================================
+  //  WATER ZONE LAYER
+  //  Lapping, bubbling, and submerged filtering near water bodies.
+  //  Driven by zone.water weight and god's isInLiquid state.
+  // ============================================================
+
+  _initWaterLayer() {
+    const ac = this.ctx
+
+    // Continuous water lapping: modulated filtered noise
+    const lapSrc = ac.createBufferSource()
+    lapSrc.buffer = this._noiseBuffer
+    lapSrc.loop = true
+    const lapBp = ac.createBiquadFilter()
+    lapBp.type = 'bandpass'
+    lapBp.frequency.value = 400
+    lapBp.Q.value = 1.5
+
+    // Slow amplitude modulation for wave-like rhythm
+    const lapLFO = ac.createOscillator()
+    lapLFO.frequency.value = 0.3 + Math.random() * 0.2
+    const lapLFOGain = ac.createGain()
+    lapLFOGain.gain.value = 0.5
+    lapLFO.connect(lapLFOGain)
+
+    const lapGain = ac.createGain()
+    lapGain.gain.value = 0
+    lapLFOGain.connect(lapGain.gain)
+
+    // Higher bubbling bed: resonant filtered noise
+    const bubbleSrc = ac.createBufferSource()
+    bubbleSrc.buffer = this._noiseBuffer
+    bubbleSrc.loop = true
+    const bubbleBp = ac.createBiquadFilter()
+    bubbleBp.type = 'bandpass'
+    bubbleBp.frequency.value = 1200
+    bubbleBp.Q.value = 4
+    // Randomised modulation for irregular bubble rhythm
+    const bubbleLFO = ac.createOscillator()
+    bubbleLFO.frequency.value = 2 + Math.random() * 3
+    const bubbleLFOGain = ac.createGain()
+    bubbleLFOGain.gain.value = 600
+    bubbleLFO.connect(bubbleLFOGain)
+    bubbleLFOGain.connect(bubbleBp.frequency)
+
+    const bubbleGain = ac.createGain()
+    bubbleGain.gain.value = 0
+
+    lapSrc.connect(lapBp).connect(lapGain)
+    bubbleSrc.connect(bubbleBp).connect(bubbleGain)
+    lapGain.connect(this.proceduralGain)
+    bubbleGain.connect(this.proceduralGain)
+
+    lapSrc.start()
+    lapLFO.start()
+    bubbleSrc.start()
+    bubbleLFO.start()
+
+    // Submerged filter: lowpass on the entire procedural bus when underwater
+    // (applied by toggling the cutoff frequency)
+    this._submergedFilter = ac.createBiquadFilter()
+    this._submergedFilter.type = 'lowpass'
+    this._submergedFilter.frequency.value = 20000 // fully open by default
+    this._submergedFilter.Q.value = 0.7
+
+    // Re-route proceduralGain through the submerged filter
+    // proceduralGain -> submergedFilter -> [existing connections]
+    // Need to disconnect proceduralGain from its current targets and insert filter
+    this.proceduralGain.disconnect()
+    this.proceduralGain.connect(this._submergedFilter)
+    this._submergedFilter.connect(this._reverbDry)
+    this._submergedFilter.connect(this._reverbPreDelay)
+
+    this._water = {
+      lapSrc, lapBp, lapGain, lapLFO,
+      bubbleSrc, bubbleBp, bubbleGain, bubbleLFO,
+    }
+    this._isSubmerged = false
+  }
+
+  // Called from zone update to modulate water layer
+  _updateWaterLayer() {
+    if (!this._water) return
+    const now = this.ctx.currentTime
+    const water = this.zones.water
+
+    // Lapping: grows with water proximity
+    this._water.lapGain.gain.setTargetAtTime(water * 0.2, now, 0.4)
+    // Bubbling: needs higher water zone weight
+    this._water.bubbleGain.gain.setTargetAtTime(Math.max(0, water - 0.2) * 0.15, now, 0.3)
+  }
+
+  // Toggle submerged lowpass filter based on god's liquid state
+  setSubmerged(inLiquid) {
+    if (!this._submergedFilter) return
+    if (inLiquid === this._isSubmerged) return
+    this._isSubmerged = inLiquid
+    const now = this.ctx.currentTime
+    // Underwater: muffle everything above 600Hz
+    // Surface: fully open (20kHz)
+    const target = inLiquid ? 600 : 20000
+    this._submergedFilter.frequency.setTargetAtTime(target, now, 0.08)
+    this._submergedFilter.Q.setTargetAtTime(inLiquid ? 2 : 0.7, now, 0.08)
+  }
+
+  // ============================================================
+  //  VILLAGER CHATTER (ANIMALESE)
+  //  Rapid pitched syllables near villages, seeded per world.
+  //  Not speech; impressionistic babble like Animal Crossing.
+  // ============================================================
+
+  _initVillagerChatter() {
+    this._chatterLastTime = 0
+    this._chatterNextDelay = 2
+    this._villagerVoice = null
+  }
+
+  // Generate per-world villager "language" from seed.
+  // Defines formant frequencies, pitch range, syllable timing.
+  _generateVillagerVoice(seed, element1, element2) {
+    const rng = mulberry32(seed + 99999)
+
+    // Vowel formants: 3-5 "phonemes" the villagers cycle through
+    const vowelCount = 3 + Math.floor(rng() * 3)
+    const vowels = []
+    for (let i = 0; i < vowelCount; i++) {
+      vowels.push({
+        f1: 250 + rng() * 600,  // first formant (openness)
+        f2: 800 + rng() * 1800, // second formant (frontness)
+        q1: 3 + rng() * 8,
+        q2: 2 + rng() * 6,
+      })
+    }
+
+    // Element influences voice character
+    const waveMap = { fire: 'sawtooth', water: 'sine', air: 'triangle', earth: 'square' }
+
+    this._villagerVoice = {
+      vowels,
+      wave: waveMap[element1] || 'triangle',
+      pitchBase: 180 + rng() * 200,    // Hz: base speaking pitch
+      pitchRange: 40 + rng() * 80,     // Hz: pitch variance between syllables
+      syllableDur: 0.06 + rng() * 0.08, // seconds per syllable
+      syllableGap: 0.02 + rng() * 0.04, // seconds between syllables
+      phraseLength: 3 + Math.floor(rng() * 5), // syllables per phrase
+      volume: 0.3 + rng() * 0.3,
+    }
+  }
+
+  // Stochastic chatter near villages; frequency scales with proximity and stage
+  updateVillagerChatter(villages, godX, godY) {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    if (!this._villagerVoice) return
+
+    // Find closest village and its proximity
+    let closestDist = Infinity
+    let closestVillage = null
+    for (const v of villages) {
+      const dx = v.worldX - godX
+      const dy = v.worldY - godY
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < closestDist) { closestDist = dist; closestVillage = v }
+    }
+
+    const range = 200
+    if (!closestVillage || closestDist > range) return
+    const proximity = 1 - closestDist / range
+    const stage = closestVillage.stage || 1
+
+    const now = this.ctx.currentTime
+    if (now - this._chatterLastTime < this._chatterNextDelay) return
+
+    this._chatterLastTime = now
+    // More frequent at higher stage and closer proximity (0.8-4s)
+    this._chatterNextDelay = 0.8 + (1 - proximity) * 2 + (1 - stage / 7) * 1.5 + Math.random() * 1.5
+
+    this._playChatterPhrase(proximity, stage)
+  }
+
+  _playChatterPhrase(proximity, stage) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const voice = this._villagerVoice
+    const vol = voice.volume * proximity
+
+    // Random pan position (villager in the settlement)
+    const panner = ac.createStereoPanner()
+    panner.pan.value = (Math.random() - 0.5) * 1.4
+    panner.connect(this.proceduralGain)
+
+    // Longer phrases at higher stages (busier settlement)
+    const syllables = voice.phraseLength + Math.floor(stage / 3)
+
+    let t = now
+    for (let s = 0; s < syllables; s++) {
+      const vowel = voice.vowels[Math.floor(Math.random() * voice.vowels.length)]
+      const pitch = voice.pitchBase + (Math.random() - 0.5) * voice.pitchRange
+      // Slight intonation: rising at start, falling at end of phrase
+      const intonation = s < syllables / 2 ? 1 + s * 0.02 : 1 + (syllables - s) * 0.015
+      const freq = pitch * intonation
+
+      const dur = voice.syllableDur * (0.7 + Math.random() * 0.6)
+
+      // Carrier oscillator
+      const osc = ac.createOscillator()
+      osc.type = voice.wave
+      osc.frequency.setValueAtTime(freq, t)
+
+      // Two formant filters shape the vowel sound
+      const f1 = ac.createBiquadFilter()
+      f1.type = 'bandpass'
+      f1.frequency.value = vowel.f1
+      f1.Q.value = vowel.q1
+      const f2 = ac.createBiquadFilter()
+      f2.type = 'bandpass'
+      f2.frequency.value = vowel.f2
+      f2.Q.value = vowel.q2
+
+      // Syllable envelope: sharp attack, short sustain, fast release
+      const env = ac.createGain()
+      env.gain.setValueAtTime(0.001, t)
+      env.gain.linearRampToValueAtTime(vol, t + 0.005)
+      env.gain.setValueAtTime(vol, t + dur * 0.6)
+      env.gain.exponentialRampToValueAtTime(0.001, t + dur)
+
+      // Split signal through both formants and sum
+      const mix = ac.createGain()
+      mix.gain.value = 0.5
+      osc.connect(f1)
+      osc.connect(f2)
+      f1.connect(mix)
+      f2.connect(mix)
+      mix.connect(env)
+      env.connect(panner)
+
+      osc.start(t)
+      osc.stop(t + dur + 0.01)
+
+      t += dur + voice.syllableGap * (0.5 + Math.random())
+    }
   }
 
   // ============================================================
