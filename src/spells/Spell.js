@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
 import { TILES, LIQUID_TILES } from '../world/TileTypes.js'
+import { COMBAT } from '../combat/Combat.js'
 
 // Base class: every spell has a name, glyph, cooldown, and a cast(scene, x, y)
 // method. Spells reach into scene state directly because they always need
@@ -83,9 +84,35 @@ export class BoltSpell extends Spell {
       }
     }
 
+    // Hit detection: any enemy god whose centre is within 12 px of the
+    // line segment takes damage. Distance from a point to a segment is
+    // the cleanest test for this geometry.
+    if (scene.enemyGod?.alive && scene.enemyGod.sprite) {
+      const eg = scene.enemyGod.sprite
+      const ex2 = sx + ux * reach
+      const ey2 = sy + uy * reach
+      if (this._segmentHitsPoint(sx, sy, ex2, ey2, eg.x, eg.y - 12, 14)) {
+        scene.damageEnemyGod(COMBAT.spells.boltDamage)
+      }
+    }
+
     if (scene.addJuice) scene.addJuice('medium')
     if (scene.ambience?.playMagic) scene.ambience.playMagic()
     return true
+  }
+
+  _segmentHitsPoint(x1, y1, x2, y2, px, py, radius) {
+    const ax = x2 - x1
+    const ay = y2 - y1
+    const lenSq = ax * ax + ay * ay
+    if (lenSq < 0.01) return false
+    let t = ((px - x1) * ax + (py - y1) * ay) / lenSq
+    t = Math.max(0, Math.min(1, t))
+    const cx = x1 + ax * t
+    const cy = y1 + ay * t
+    const dx = px - cx
+    const dy = py - cy
+    return (dx * dx + dy * dy) <= radius * radius
   }
 }
 

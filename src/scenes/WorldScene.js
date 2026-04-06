@@ -7,6 +7,7 @@ import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
 import Bodyguard from '../civilisation/Bodyguard.js'
 import Tablet from '../civilisation/Tablet.js'
+import EnemyGod from '../combat/EnemyGod.js'
 import Minimap from '../ui/Minimap.js'
 import TabletInventory from '../ui/TabletInventory.js'
 import SpellBar from '../ui/SpellBar.js'
@@ -220,6 +221,11 @@ export default class WorldScene extends Phaser.Scene {
     this.spellBar = new SpellBar(this)
     this._wireSpellInput()
 
+    // Spawn one rival deity on the opposite side of the world from the
+    // player. Far enough that the player has to travel to find it but
+    // not so far it never appears on the minimap.
+    this._spawnEnemyGod(worldData)
+
     // Minimap
     this.minimap = new Minimap(this, this.worldGrid, params)
     this.villages.forEach(v => this.minimap.addVillageMarker(v))
@@ -339,6 +345,19 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 1,
     }).setScrollFactor(0).setDepth(50)
+
+    // God HP gauge: simple text + horizontal bar above the HUD column
+    this.hpHUD = this.add.text(pad, pad + 68, 'HP: 100', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '11px',
+      color: '#ff8888',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setScrollFactor(0).setDepth(50)
+    this.hpBarBack = this.add.rectangle(pad, pad + 84, 80, 4, 0x222222, 0.85)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(50)
+    this.hpBarFill = this.add.rectangle(pad, pad + 84, 80, 4, 0xaa3333, 1)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(51)
 
     // Hint text
     this.hintText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 30,
@@ -564,11 +583,22 @@ export default class WorldScene extends Phaser.Scene {
     // Bodyguards: dispatch + update + cleanup
     this._updateBodyguards(dilatedDelta)
 
+    // Enemy god roaming + AI
+    if (this.enemyGod) this.enemyGod.update(dilatedDelta, this.god.sprite)
+
     // Spells: tick cooldowns + refresh HUD
     if (this.spellBook) {
       this.spellBook.setUnlockCount(this.god.totalEverCollected)
       this.spellBook.update(dilatedDelta)
       if (this.spellBar) this.spellBar.update(this.spellBook)
+    }
+
+    // HP HUD
+    if (this.hpHUD && this.god) {
+      const hp = Math.floor(this.god.hp)
+      const max = this.god.maxHp
+      this.hpHUD.setText(`HP: ${hp}`)
+      this.hpBarFill.width = 80 * Math.max(0, hp / max)
     }
 
     // Population HUD (only redraw when the number changes)
@@ -772,6 +802,25 @@ export default class WorldScene extends Phaser.Scene {
   shutdown() {
     if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
+  }
+
+  // ── Enemy spawn / update ─────────────────────────────
+  _spawnEnemyGod(worldData) {
+    const farX = (this.god.sprite.x + (WORLD_WIDTH * TILE_SIZE) / 2) % (WORLD_WIDTH * TILE_SIZE)
+    const tileX = Math.floor(farX / TILE_SIZE)
+    let surfaceY = Math.floor(worldData.surfaceHeights[tileX])
+    surfaceY = this.snapToGround(worldData.grid, tileX, surfaceY)
+    const px = farX
+    const py = surfaceY * TILE_SIZE - 4
+
+    this.enemyGod = new EnemyGod(this, px, py)
+    this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
+  }
+
+  // Public hook used by spells (and bodyguards) to damage the rival god.
+  damageEnemyGod(amount) {
+    if (!this.enemyGod || !this.enemyGod.alive) return
+    this.enemyGod.takeDamage(amount)
   }
 
   // ── Spell input ──────────────────────────────────────

@@ -1,6 +1,7 @@
 import { TILE_SIZE, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
 import { SOLID_TILES, LIQUID_TILES } from '../world/TileTypes.js'
 import { ensureWarriorTexture } from './Warrior.js'
+import { COMBAT, bodyguardHp, bodyguardMeleeDamage } from '../combat/Combat.js'
 
 // An escort unit dispatched by a village. Walks on terrain, jumps over
 // short obstacles, and lifts off briefly to follow the god when he flies
@@ -24,6 +25,13 @@ export default class Bodyguard {
     this._lastProgressTime = 0
     this._lastDistance = Infinity
     this._isFlying = false
+
+    // Combat
+    this.maxHp = bodyguardHp(stage)
+    this.hp = this.maxHp
+    this.meleeDamage = bodyguardMeleeDamage(stage)
+    this._lastMeleeTime = 0
+    this.alive = true
 
     const key = ensureWarriorTexture(scene, stage, clothingColour)
     this.sprite = scene.add.sprite(x, y, key)
@@ -49,14 +57,45 @@ export default class Bodyguard {
   }
 
   update(delta, worldGrid) {
-    if (!this.god?.sprite || !this.sprite.body) return
+    if (!this.alive || !this.god?.sprite || !this.sprite.body) return
+
+    // If a rival god is in melee range, prefer attacking it over slot keeping
+    const enemy = this.scene.enemyGod
+    let combatTarget = null
+    if (enemy?.alive && enemy.sprite) {
+      const edx = enemy.sprite.x - this.sprite.x
+      const edy = enemy.sprite.y - this.sprite.y
+      const ed = Math.sqrt(edx * edx + edy * edy)
+      if (ed < TILE_SIZE * 12) combatTarget = enemy
+    }
 
     const offset = this._slotOffset()
-    const targetX = this.god.sprite.x + offset.dx
-    const targetY = this.god.sprite.y + offset.dy
+    const baseX = combatTarget ? combatTarget.sprite.x : this.god.sprite.x + offset.dx
+    const baseY = combatTarget ? combatTarget.sprite.y - 6 : this.god.sprite.y + offset.dy
+    const targetX = baseX
+    const targetY = baseY
     const dx = targetX - this.sprite.x
     const dy = targetY - this.sprite.y
     const dist = Math.sqrt(dx * dx + dy * dy)
+
+    // Melee strike if in range and off cooldown
+    if (combatTarget && dist < COMBAT.bodyguard.meleeRange) {
+      const now = this.scene.time.now
+      if (now - this._lastMeleeTime > COMBAT.bodyguard.meleeCooldown) {
+        this._lastMeleeTime = now
+        combatTarget.takeDamage(this.meleeDamage)
+        // Tiny lunge feedback
+        if (this.sprite) {
+          this.scene.tweens.add({
+            targets: this.sprite,
+            scaleX: 1.15,
+            scaleY: 1.15,
+            yoyo: true,
+            duration: 90,
+          })
+        }
+      }
+    }
 
     // If we're insanely far away (god teleported / wrapped), snap-warp
     // so the bodyguard doesn't trail forever.

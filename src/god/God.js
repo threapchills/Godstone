@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { TILE_SIZE, GOD_SPEED, GOD_JUMP, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
 import { TILES, LIQUID_TILES, SOLID_TILES } from '../world/TileTypes.js'
 import { createGodTexture, GOD_W, GOD_H } from './GodRenderer.js'
+import { COMBAT } from '../combat/Combat.js'
 
 const FLAP_IMPULSE = -220       // upward burst per space press
 const FLAP_COOLDOWN = 180       // ms between flaps
@@ -32,6 +33,11 @@ export default class God {
     // totalEverCollected only ever increments; used by spell unlocks.
     this.tablets = {}
     this.totalEverCollected = 0
+
+    // Combat
+    this.maxHp = COMBAT.god.maxHp
+    this.hp = this.maxHp
+    this._lastDamageTime = 0
     this.lastFlapTime = 0
     this.lastDigTime = 0
     this.coyoteTimer = 0
@@ -282,6 +288,23 @@ export default class God {
   collectTablet(stage) {
     this.tablets[stage] = (this.tablets[stage] || 0) + 1
     this.totalEverCollected++
+  }
+
+  // Damage with brief invulnerability so a sustained beam doesn't drain
+  // HP in a single frame.
+  takeDamage(amount, time = performance.now()) {
+    if (time - this._lastDamageTime < 500) return
+    this._lastDamageTime = time
+    this.hp = Math.max(0, this.hp - amount)
+    if (this.sprite) {
+      this.sprite.setTint(0xff5555)
+      this.scene.time.delayedCall(140, () => this.sprite && this.sprite.clearTint())
+    }
+    if (this.hp <= 0) {
+      // Reset HP on respawn; the scene's respawnGod handles the move
+      this.hp = this.maxHp
+      if (this.scene.respawnGod) this.scene.respawnGod()
+    }
   }
 
   // Try to spend a tablet of the given stage. Returns true on success.
