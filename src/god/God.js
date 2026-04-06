@@ -49,6 +49,7 @@ export default class God {
     const { key } = createGodTexture(scene, params)
     this.sprite = scene.add.sprite(x, y, key)
     this.sprite.setOrigin(0.5, 1)
+    this.sprite.setScale(0.5) // human-sized relative to 8px tiles
     this.sprite.setDepth(10)
   }
 

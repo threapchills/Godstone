@@ -97,11 +97,12 @@ export default class Village {
 
     this.sprite = scene.add.sprite(px, py, key)
     this.sprite.setOrigin(0.5, 1)
+    this.sprite.setScale(1.5)
     this.sprite.setDepth(5)
   }
 
   createLabel(scene, px, py) {
-    this.label = scene.add.text(px, py - TILE_SIZE * 4, `${this.name} · ${this.population}`, {
+    this.label = scene.add.text(px, py - TILE_SIZE * 10, `${this.name} · ${this.population}`, {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
       color: '#daa520',
@@ -114,7 +115,7 @@ export default class Village {
 
   updateBeliefBar() {
     const px = this.tileX * TILE_SIZE + TILE_SIZE / 2
-    const py = this.tileY * TILE_SIZE - TILE_SIZE * 4 - 6
+    const py = this.tileY * TILE_SIZE - TILE_SIZE * 10 - 6
     const barWidth = 24
     const barHeight = 3
 
@@ -169,7 +170,7 @@ export default class Village {
 
     // Stage 2+: add a fire pit or second hut
     if (this.stage >= 2) {
-      const firepit = this.scene.add.circle(px + TILE_SIZE * 3, py - 2, 3, 0xff6600, 0.8)
+      const firepit = this.scene.add.circle(px + TILE_SIZE * 5, py - 2, 3, 0xff6600, 0.8)
       firepit.setDepth(5)
 
       // Fire flicker
@@ -183,7 +184,7 @@ export default class Village {
       })
 
       // Small smoke column
-      const smoke = this.scene.add.circle(px + TILE_SIZE * 3, py - 8, 2, 0x888888, 0.3)
+      const smoke = this.scene.add.circle(px + TILE_SIZE * 5, py - 8, 2, 0x888888, 0.3)
       smoke.setDepth(5)
       this.scene.tweens.add({
         targets: smoke,

@@ -57,12 +57,12 @@ export default class CritterManager {
     const px = tileX * TILE_SIZE + TILE_SIZE / 2
     const py = tileY * TILE_SIZE
 
-    // Tiny 4x3 pixel sprite
+    // Small but visible critter sprite (one tile wide)
     const key = `critter-${type.name}`
     if (!scene.textures.exists(key)) {
       const canvas = document.createElement('canvas')
-      canvas.width = 4
-      canvas.height = 3
+      canvas.width = 8
+      canvas.height = 6
       const ctx = canvas.getContext('2d')
 
       const r = (type.colour >> 16) & 0xff
@@ -71,12 +71,19 @@ export default class CritterManager {
 
       // Body
       ctx.fillStyle = `rgb(${r},${g},${b})`
-      ctx.fillRect(0, 1, 4, 2)
+      ctx.fillRect(1, 2, 6, 3)
+      ctx.fillRect(2, 1, 4, 1)
       // Head
-      ctx.fillRect(3, 0, 1, 1)
-      // Lighter pixel
+      ctx.fillRect(6, 1, 2, 2)
+      // Highlight
       ctx.fillStyle = `rgb(${Math.min(255, r + 40)},${Math.min(255, g + 40)},${Math.min(255, b + 40)})`
-      ctx.fillRect(1, 1, 1, 1)
+      ctx.fillRect(3, 3, 2, 1)
+      ctx.fillRect(7, 1, 1, 1)
+      // Legs
+      ctx.fillStyle = `rgb(${Math.max(0, r - 30)},${Math.max(0, g - 30)},${Math.max(0, b - 30)})`
+      ctx.fillRect(2, 5, 1, 1)
+      ctx.fillRect(4, 5, 1, 1)
+      ctx.fillRect(6, 5, 1, 1)
 
       scene.textures.addCanvas(key, canvas)
     }

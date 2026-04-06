@@ -432,9 +432,9 @@ function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData)
       const r = rng()
 
       if (r < treeChance && n > -0.2) {
-        const treeHeight = 2 + Math.floor(rng() * 3)
+        const treeHeight = 4 + Math.floor(rng() * 4) // 4-7 tiles tall
         let canPlace = true
-        for (let dy = 1; dy <= treeHeight + 2; dy++) {
+        for (let dy = 1; dy <= treeHeight + 3; dy++) {
           if (y - dy < 0 || grid[idx(x, y - dy)] !== TILES.AIR) {
             canPlace = false; break
           }
@@ -442,12 +442,17 @@ function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData)
         if (canPlace) {
           for (let dy = 1; dy <= treeHeight; dy++) grid[idx(x, y - dy)] = TILES.TREE_TRUNK
           const topY = y - treeHeight
-          grid[idx(x, topY - 1)] = TILES.TREE_LEAVES
-          grid[idx(x, topY)] = TILES.TREE_LEAVES
-          if (x > 0 && grid[idx(x - 1, topY)] === TILES.AIR) grid[idx(x - 1, topY)] = TILES.TREE_LEAVES
-          if (x < WORLD_WIDTH - 1 && grid[idx(x + 1, topY)] === TILES.AIR) grid[idx(x + 1, topY)] = TILES.TREE_LEAVES
-          if (x > 0 && grid[idx(x - 1, topY - 1)] === TILES.AIR) grid[idx(x - 1, topY - 1)] = TILES.TREE_LEAVES
-          if (x < WORLD_WIDTH - 1 && grid[idx(x + 1, topY - 1)] === TILES.AIR) grid[idx(x + 1, topY - 1)] = TILES.TREE_LEAVES
+          // 5-wide, 3-tall rounded canopy
+          for (let ly = -2; ly <= 0; ly++) {
+            for (let lx = -2; lx <= 2; lx++) {
+              if (Math.abs(lx) === 2 && ly === -2) continue // round corners
+              const gx = x + lx
+              const gy = topY + ly
+              if (gx >= 0 && gx < WORLD_WIDTH && gy >= 0 && grid[idx(gx, gy)] === TILES.AIR) {
+                grid[idx(gx, gy)] = TILES.TREE_LEAVES
+              }
+            }
+          }
         }
       } else if (r < treeChance + bushChance && n > -0.3) {
         grid[idx(x, y - 1)] = TILES.BUSH
