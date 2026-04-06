@@ -435,7 +435,8 @@ export default class AmbienceEngine {
     
     // Connect to procedural gain which handles wet/dry reverb procedurally based on zones
     const gain = ac.createGain()
-    gain.gain.value = buf.pregain * 1.5
+    // Reduced from 1.5
+    gain.gain.value = buf.pregain * 0.35
     src.connect(gain).connect(this.proceduralGain)
     src.start()
   }
@@ -448,7 +449,8 @@ export default class AmbienceEngine {
     src.playbackRate.value = 0.9 + Math.random() * 0.2
     
     const gain = ac.createGain()
-    gain.gain.value = this.oneShots.gong.pregain * 2.0
+    // Reduced from 2.0
+    gain.gain.value = this.oneShots.gong.pregain * 0.4
     src.connect(gain).connect(this.proceduralGain)
     src.start()
   }

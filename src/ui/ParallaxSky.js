@@ -58,6 +58,14 @@ export default class ParallaxSky {
     if (this.layers[2]) this.layers[2].tilePositionX += 10 * dtSeconds
   }
 
+  // Called when the world seamlessly teleports the player
+  shiftWrap(worldDeltaX) {
+    for (const layer of this.layers) {
+      // Counter the parallax jump exactly 
+      layer.tilePositionX -= worldDeltaX * layer.scrollFactorX
+    }
+  }
+
   destroy() {
     this.layers.forEach(layer => layer.destroy())
     this.layers = []

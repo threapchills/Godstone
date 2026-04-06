@@ -220,22 +220,21 @@ export default class Village {
     for (let i = 0; i < count; i++) {
       const type = this._pickBuildingType(rng)
       const dx = i === 0 ? 0 : (rng() - 0.5) * 2 * spread * TILE_SIZE
-      const key = this._ensureBuildingTexture(type)
+      const key = this._ensureBuildingTexture(type, rng)
       const sprite = this.scene.add.sprite(cx + dx, py, key)
       sprite.setOrigin(0.5, 1)
-      sprite.setDepth(5)
-      this.buildings.push(sprite)
+      sprite.setDepth(4) // Behind god and critters
 
-      if (type === 'firepit') {
-        this.scene.tweens.add({
-          targets: sprite,
-          alpha: { from: 1, to: 0.5 },
-          scaleX: { from: 1, to: 1.3 },
-          duration: 400 + Math.floor(rng() * 200),
-          yoyo: true,
-          repeat: -1,
-        })
+      // Massive scale up for the teepees
+      if (key.includes('teepee')) {
+        sprite.setScale(3.5)
+        // Tint them slightly to fit the village palette
+        sprite.setTint(this.wallColour)
+      } else {
+        sprite.setDepth(5)
       }
+      
+      this.buildings.push(sprite)
     }
 
     // First building doubles as this.sprite for backward compat
@@ -264,18 +263,20 @@ export default class Village {
     return 'longhouse'
   }
 
-  _ensureBuildingTexture(type) {
-    const key = `bld-${type}-${this.params.element1}-${this.params.element2}`
-    if (this.scene.textures.exists(key)) return key
-
-    const spec = BUILDING_SPECS[type]
-    const canvas = document.createElement('canvas')
-    canvas.width = spec.w
-    canvas.height = spec.h
-    const ctx = canvas.getContext('2d')
-    spec.draw(ctx, spec.w, spec.h, this.wallColour, this.roofColour, this.darkColour)
-    this.scene.textures.addCanvas(key, canvas)
-    return key
+  _ensureBuildingTexture(type, rng) {
+    if (type === 'firepit') {
+      const key = `bld-firepit-${this.params.element1}`
+      if (!this.scene.textures.exists(key)) {
+        const canvas = document.createElement('canvas')
+        canvas.width = 8; canvas.height = 6
+        const ctx = canvas.getContext('2d')
+        drawFirepit(ctx, 8, 6)
+        this.scene.textures.addCanvas(key, canvas)
+      }
+      return key
+    }
+    // Return massive pre-rendered teepee textures
+    return rng() > 0.5 ? 'sb_teepee_blue' : 'sb_teepee_green'
   }
 
   // ── Villager management ─────────────────────────────

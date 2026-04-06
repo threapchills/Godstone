@@ -170,6 +170,26 @@ export function generateWorld(params) {
     }
   }
 
+  // ── Pass 3b: Swiss cheese cavern carving (Labyrinth) ───────
+  // Carve worm-like tunnels to create labyrinthine cave networks.
+  // We use the absolute value of noise to trace zero-crossings (worms).
+  const labyrinthScale = 0.025
+  // sparseDense 0 (Sparse) = moderate tunnels; 1 (Dense) = extreme honeycomb.
+  const labyrinthThreshold = 0.06 + sparseDense * 0.14
+  
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    const startY = Math.floor(surfaceHeights[x]) + 8
+    for (let y = startY; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 5; y++) {
+      if (grid[idx(x, y)] === TILES.STONE) {
+        const n = Math.abs(noise2D_b(x * labyrinthScale + 5000, y * labyrinthScale + 5000))
+        if (n < labyrinthThreshold) {
+          grid[idx(x, y)] = TILES.AIR
+        }
+      }
+    }
+  }
+
+
   // ── Pass 4: refine tile types ─────────────────────────────
   // Mark every air-solid boundary as SURFACE; add soil beneath each one.
   // This gives us walkable surfaces at every altitude: cliff ledges,

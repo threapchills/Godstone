@@ -31,8 +31,11 @@ export default class God {
     this.tablets = []
     this.lastFlapTime = 0
     this.lastDigTime = 0
+    this.lastDigTime = 0
     this.coyoteTimer = 0
     this.isFlying = false
+    this.wasOnGround = true
+    this.lastFallSpeed = 0
 
     // Input
     this.cursors = scene.input.keyboard.createCursorKeys()
@@ -56,6 +59,17 @@ export default class God {
   update(worldGrid, time) {
     const body = this.sprite.body
     const onGround = body.blocked.down
+
+    // Landing detection
+    if (onGround && !this.wasOnGround) {
+      if (this.lastFallSpeed > 150) {
+        // Calculate shake amount based on fall severity (maxes out around 0.3)
+        const traumaAmount = Math.min(0.3, (this.lastFallSpeed - 150) / 1000)
+        if (this.scene.addTrauma) this.scene.addTrauma(traumaAmount)
+      }
+    }
+    this.wasOnGround = onGround
+    this.lastFallSpeed = body.velocity.y
 
     // Coyote time: brief grace period after leaving ground
     if (onGround) {
@@ -134,7 +148,7 @@ export default class God {
         dug = this.digAt(worldGrid, 0, 1) || dug
         dug = this.digAt(worldGrid, 0, 2) || dug
       }
-      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.1)
+      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.04)
     }
     // Up digs upward (critical for escaping underground)
     if (wantsJump && time - this.lastDigTime > DIG_RATE) {
@@ -144,7 +158,7 @@ export default class God {
       dug = this.digAt(worldGrid, 0, -2) || dug
       if (movingLeft) dug = this.digAt(worldGrid, -1, -1) || dug
       if (movingRight) dug = this.digAt(worldGrid, 1, -1) || dug
-      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.1)
+      if (dug && this.scene.addTrauma) this.scene.addTrauma(0.04)
     }
 
     // Auto-dig when walking into walls

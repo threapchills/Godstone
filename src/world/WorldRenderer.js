@@ -2,7 +2,7 @@ import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH } from '../core/Consta
 import { TILES, buildPalette } from './TileTypes.js'
 
 // Padding columns on each side for seamless horizontal wrapping
-export const WRAP_PAD = Math.ceil(GAME_WIDTH / TILE_SIZE / 2) + 8
+export const WRAP_PAD = Math.ceil(GAME_WIDTH / TILE_SIZE / 2) + 50
 
 // Generate a tileset texture at runtime from the element palette and skybaby assets.
 export function createTilesetTexture(scene, params) {
@@ -83,7 +83,11 @@ export function createTilemap(scene, worldData) {
       let wx = x - WRAP_PAD
       wx = ((wx % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
       const tile = grid[y * WORLD_WIDTH + wx]
-      row.push(tile === TILES.AIR ? -1 : tile)
+      if (tile === TILES.AIR || tile === TILES.TREE_LEAVES || tile === TILES.TREE_TRUNK) {
+        row.push(-1)
+      } else {
+        row.push(tile)
+      }
     }
     data.push(row)
   }

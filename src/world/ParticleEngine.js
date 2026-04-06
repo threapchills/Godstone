@@ -78,13 +78,13 @@ export default class ParticleEngine {
       y: w1.y * ratio + w2.y * (1 - ratio),
     }
 
-    // Soft-edged texture shared by all particles
-    const texKey = createSoftCircleTexture(scene)
+    // Soft-edged texture shared by default particles
+    this.defaultTexKey = createSoftCircleTexture(scene)
 
-    // Pre-allocate the pool with image sprites instead of solid circles
+    // Pre-allocate the pool with image sprites
     this.pool = new Array(POOL_SIZE)
     for (let i = 0; i < POOL_SIZE; i++) {
-      const sprite = scene.add.image(0, 0, texKey)
+        const sprite = scene.add.image(0, 0, this.defaultTexKey)
         .setVisible(false).setDepth(6).setAlpha(0).setOrigin(0.5)
       this.pool[i] = {
         sprite,
@@ -92,6 +92,7 @@ export default class ParticleEngine {
         life: 0, maxLife: 1,
         sizeStart: 2, sizeEnd: 2,
         flickerRate: 0,
+        spinSpeed: 0,
         type: '',
         active: false,
       }
@@ -123,6 +124,10 @@ export default class ParticleEngine {
       p.vy += this.wind.y * dtSec * 0.3
       p.x += p.vx * dtSec
       p.y += p.vy * dtSec
+      
+      if (p.spinSpeed) {
+        p.sprite.rotation += p.spinSpeed * dtSec * p.vx * 0.05
+      }
 
       // Life progress: 0 at birth, 1 at death
       const t = p.life / p.maxLife
@@ -224,7 +229,7 @@ export default class ParticleEngine {
 
     if (element === 'air') {
       if (!underground) {
-        c.push({ key: 'leaf', size: [3, 5], sizeEnd: 0.8, life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6 })
+        c.push({ key: 'leaf', sprite: 'leaf', size: [6, 10], sizeEnd: 0.8, life: [3000, 6000], vx: [10, 30], vy: [-5, 8], spawn: 'edge', depth: 6, spinSpeed: 0.8 })
         c.push({ key: 'cloudWisp', size: [6, 12], sizeEnd: 1.5, life: [4000, 7000], vx: [5, 15], vy: [-2, 2], spawn: 'edge', depth: 5 })
       } else {
         c.push({ key: 'dustMote', size: [2, 3.5], sizeEnd: 1.2, life: [3000, 5000], vx: [-3, 3], vy: [-2, 2], spawn: 'area', depth: 5 })
@@ -234,6 +239,7 @@ export default class ParticleEngine {
     if (element === 'earth') {
       if (!underground) {
         c.push({ key: 'pollen', size: [2, 3.5], sizeEnd: 0.7, life: [3000, 5000], vx: [-5, 8], vy: [-10, -3], spawn: 'area', depth: 6 })
+        c.push({ key: 'leaf', sprite: 'leaf', size: [4, 8], sizeEnd: 0.8, life: [3000, 5000], vx: [-5, 5], vy: [-5, 10], spawn: 'area', depth: 6, spinSpeed: 0.5 })
         c.push({ key: 'dust', size: [3, 5], sizeEnd: 1.4, life: [2000, 4000], vx: [-8, 8], vy: [-3, 3], spawn: 'edge', depth: 5 })
         if (night) c.push({ key: 'firefly', size: [2, 3.5], sizeEnd: 1.0, life: [4000, 8000], vx: [-5, 5], vy: [-5, 5], spawn: 'area', depth: 11, flickerRate: 0.004 })
       } else {
@@ -294,6 +300,9 @@ export default class ParticleEngine {
     p.sizeStart = size
     p.sizeEnd = size * endMultiplier
     p.flickerRate = def.flickerRate || 0
+    p.spinSpeed = def.spinSpeed || 0
+
+    p.sprite.setTexture(def.sprite || this.defaultTexKey)
 
     p.sprite.setTint(colour)
     p.sprite.setPosition(x, y)

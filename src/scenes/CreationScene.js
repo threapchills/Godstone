@@ -29,6 +29,9 @@ export default class CreationScene extends Phaser.Scene {
     this.load.image('sb_sky1', 'assets/backgrounds/sky_layer_1.jpeg')
     this.load.image('sb_sky2', 'assets/backgrounds/sky_layer_2.png')
     this.load.image('sb_clouds', 'assets/backgrounds/clouds_fg.png')
+    this.load.image('sb_teepee_blue', 'assets/environment/teepee_blue.png')
+    this.load.image('sb_teepee_green', 'assets/environment/teepee_green.png')
+    this.load.image('leaf', 'assets/environment/leaf.png')
   }
 
   create() {

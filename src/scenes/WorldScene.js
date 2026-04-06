@@ -13,6 +13,8 @@ import CritterManager from '../world/Critters.js'
 import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
+import FoliageRenderer from '../world/FoliageRenderer.js'
+import ParallaxForeground from '../world/ParallaxForeground.js'
 
 const VILLAGE_COUNT = 4
 const TABLET_COUNT = 3
@@ -55,7 +57,7 @@ export default class WorldScene extends Phaser.Scene {
     const worldData = generateWorld(params)
 
     // Create tileset and tilemap
-    createTilesetTexture(this, params)
+    const palette = createTilesetTexture(this, params)
     const { map, layer } = createTilemap(this, worldData)
     setupCollision(layer)
 
@@ -159,9 +161,9 @@ export default class WorldScene extends Phaser.Scene {
       village._zone = zone
     })
 
-    // Camera follows god
-    this.cameras.main.startFollow(this.god.sprite, true, 0.1, 0.1)
-    this.cameras.main.setDeadzone(100, 50)
+    // Custom camera tracking implemented in update loop for seamless wrapping
+    this.cameras.main.scrollX = this.god.sprite.x - GAME_WIDTH / 2
+    this.cameras.main.scrollY = this.god.sprite.y - GAME_HEIGHT / 2
 
     // World bounds for physics (extended to cover wrap padding so collisions work at edges)
     this.physics.world.setBounds(
@@ -179,6 +181,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // Parallax sky background
     this.parallaxSky = new ParallaxSky(this, params)
+    
+    // Parallax foreground overlay
+    this.parallaxForeground = new ParallaxForeground(this, palette)
 
     // Ambient critters
     this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
@@ -188,6 +193,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // Grid Sand Simulator
     this.gridSimulator = new GridSimulator(this, this.worldGrid)
+
+    // Foliage Overlay
+    this.foliageRenderer = new FoliageRenderer(this, this.worldGrid, palette)
 
     // HUD
     this.createHUD(params)
@@ -398,14 +406,6 @@ export default class WorldScene extends Phaser.Scene {
 
     if (this.trauma > 0) {
       this.trauma = Math.max(0, this.trauma - 0.8 * step)
-      const shake = this.trauma * this.trauma
-      const shakeScale = 20
-      this.cameras.main.setFollowOffset(
-        (Math.random() - 0.5) * shake * shakeScale,
-        (Math.random() - 0.5) * shake * shakeScale
-      )
-    } else {
-      this.cameras.main.setFollowOffset(0, 0)
     }
 
     // God movement
@@ -413,10 +413,35 @@ export default class WorldScene extends Phaser.Scene {
 
     // Horizontal world wrapping
     const worldPixelWidth = WORLD_WIDTH * TILE_SIZE
+    let wrapDelta = 0
     if (this.god.sprite.x < 0) {
-      this.god.sprite.x += worldPixelWidth
+      wrapDelta = worldPixelWidth
     } else if (this.god.sprite.x >= worldPixelWidth) {
-      this.god.sprite.x -= worldPixelWidth
+      wrapDelta = -worldPixelWidth
+    }
+    
+    if (wrapDelta !== 0) {
+      this.god.sprite.x += wrapDelta
+      this.cameras.main.scrollX += wrapDelta
+      // Notify parallax layers to instantly counteract the camera's sudden jump
+      if (this.parallaxSky) this.parallaxSky.shiftWrap(wrapDelta)
+      if (this.parallaxForeground) this.parallaxForeground.shiftWrap(wrapDelta)
+    }
+
+    // Custom snappy camera follow
+    const cam = this.cameras.main
+    const targetScrollX = this.god.sprite.x - GAME_WIDTH / 2
+    const targetScrollY = this.god.sprite.y - GAME_HEIGHT / 2 + 50
+    // Snappy interpolation
+    cam.scrollX += (targetScrollX - cam.scrollX) * 0.4
+    cam.scrollY += (targetScrollY - cam.scrollY) * 0.4
+
+    // Apply trauma shake visually
+    if (this.trauma > 0) {
+      const shake = this.trauma * this.trauma
+      const shakeScale = 25
+      cam.scrollX += (Math.random() - 0.5) * shake * shakeScale
+      cam.scrollY += (Math.random() - 0.5) * shake * shakeScale
     }
 
     // Kill plane
@@ -462,9 +487,9 @@ export default class WorldScene extends Phaser.Scene {
     
     // Parallax
     if (this.parallaxSky) this.parallaxSky.update(dilatedDelta)
+    if (this.parallaxForeground) this.parallaxForeground.update(cam.scrollX)
 
     // Active Chunk for Grid Simulator
-    const cam = this.cameras.main
     const viewPad = 15 // tiles padding outside view
     const activeRect = {
       x: Math.floor(cam.scrollX / TILE_SIZE) - viewPad,
@@ -473,6 +498,9 @@ export default class WorldScene extends Phaser.Scene {
       h: Math.ceil(cam.height / TILE_SIZE) + viewPad * 2
     }
     if (this.gridSimulator) this.gridSimulator.update(time, dilatedDelta, activeRect)
+
+    // Foliage update (destroy burned trees)
+    if (this.foliageRenderer) this.foliageRenderer.update()
 
     // Minimap
     if (this.minimap) this.minimap.update(this.god.sprite)
