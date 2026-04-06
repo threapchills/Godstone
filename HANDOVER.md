@@ -6,7 +6,7 @@ Living document. Each session: move shipped work into "last session", drop new r
 
 - **Phase 1 (world, god, villages, tablets):** complete. Live at https://threapchills.github.io/Godstone/.
 - **Phase 2 (interactive particle simulation):** core falling-sand loop is in place. `world/GridSimulator.js` runs water / sand / lava on a moved-flag generation tracker with alternating scan; lava + water reactions emit hiss/steam events that the sound engine plays back. Still on the main thread; the planned Web Worker move is unfinished.
-- **Phase 3 (full single-player loop — spells, combat, populations):** partial. Villages stage 1 to 7 exist with sprawl, but the upgrade gate is broken (out-of-order tablets work). Tablets exist but are nearly invisible. No spells, no NPC gods, no NPC warriors yet.
+- **Phase 3 (full single-player loop):** core systems shipped. Coherent village upgrade gate, tablet inventory + HUD, stage-equipped warriors, dispatched bodyguards, three-spell loadout with mouse controls, rival god with tiny AI tree, melee + bolt combat. Still missing: enemy warriors, populated battles, balance pass.
 - **Phase 4 (multiplayer, portal omniverse):** not started.
 - **Phase 5 (polish):** sound engine has eight spatial systems shipped; SkyBaby sample integration is still procedural-only.
 
@@ -19,145 +19,111 @@ src/
   world/
     WorldGenerator.js   WorldRenderer.js   TileTypes.js
     GridSimulator.js    PortalHenge.js     Critters.js
-    FoliageRenderer.js  ParallaxForeground.js   (inert; deletion candidate)
+    FoliageRenderer.js  ParticleEngine.js
+    ParallaxForeground.js   (inert; deletion candidate)
   god/
     God.js              GodRenderer.js
   civilisation/
     Village.js          Tablet.js
+    Warrior.js          Bodyguard.js
+  combat/
+    Combat.js           EnemyGod.js
+  spells/
+    Spell.js            SpellBook.js
   scenes/
     CreationScene.js    WorldScene.js
   ui/
     Minimap.js          ParallaxSky.js
+    TabletInventory.js  SpellBar.js
   sound/
     AmbienceEngine.js
   utils/
 public/sounds/          (28 OGG; sky/fire/earth/sea x7 each)
 ```
 
-## Last session — what shipped (currently uncommitted)
+## Last session: what shipped
 
-Working tree has seven modified files plus inert `ParallaxForeground.js`. Commit before starting new work.
+All changes committed and pushed; live deploy is current. The session ran through eight backlog items in priority order.
 
-- **GridSimulator wobble fix.** Single water/lava tiles on flat ground used to oscillate forever because of a random tiebreaker. Lateral spread now only fires when the cell is `inBody` (above/left/right neighbour is the same liquid), and the tiebreaker is deterministic via `((x + y) & 1)`. Steady-state equilibrium reachable.
-- **Ghost trees removed.** `ParallaxForeground` (the translucent silhouette layer in front of the world) looked like floating phantoms. WorldScene no longer instantiates it; the file is still on disk awaiting deletion.
-- **Surface snapping.** `WorldScene.snapToGround(grid, x, startY)` plus an equivalent walk-down loop in `FoliageRenderer.spawnTree`. Trees and huts now sit flush on eroded terrain instead of floating where the cached surface y said they should be.
-- **Building scale.** `Village.js` scales building sprites by `BUILDING_SCALE = 2.5` and uses a wider `STAGE_SPREAD` (`[0, 5, 8, 12, 16, 22, 28, 34]`). Buildings are now bigger than the god, smaller than trees, and stage-7 settlements actually sprawl.
-- **Sky ceiling.** WorldScene clamps the god's y at `SKY_CEILING = -30 * TILE_SIZE`. Plenty of headroom; no more flying off the top of the minimap into the void.
-- **ParallaxSky overhaul.** Five layers (was three): distant sky wash, mid band, painted clouds, near streaks, foreground mist. Each layer is element-tinted via the world palette, with a base rectangle at depth -12 guaranteeing coverage at every camera position. Day/night cycle uses a sun-height curve (`Math.sin(dayTime * Math.PI * 2 - Math.PI / 2)`) to blend night navy → base sky → daylight white → horizon amber across all layers and the base rect.
-- **Critter variety per world.** `Critters.js` defines three subtypes per element (salamander/phoenix/ember-mite for fire; crab/frog/newt for water; moth/wisp/sky-mite for air; beetle/lizard/cricket for earth). `pickCritter(element, seed)` deterministically chooses one per world. Same element pair produces different fauna depending on the seed.
+- **Circular minimap with live grid updates.** `src/ui/Minimap.js` projects the world onto a disc instead of a flat rectangle (sky at the rim, bedrock-tinted core at the centre, world wraps around). Pre-baked inverse projection lookup makes each refresh a single ImageData write. Refreshes from the live grid every 250 ms so dug terrain, lava flow, and water erosion all show through. Markers projected via shared forward helper.
+- **Tablet glow effect.** `src/civilisation/Tablet.js` rebuilt with five additive aura layers per tablet: outer halo, inner halo, vertical godray shaft, five orbiting motes on a squashed orbit, hovering glyph pip. Proximity reactivity swells the inner halo and pip when the god is within ~2.5 tiles, with hysteresis preventing re-trigger. New `AmbienceEngine.playTabletShimmer` is a pure-synth pentatonic chord with octave shimmer + high noise sparkle.
+- **Coherent village upgrade gate.** `God.tablets` is now a count map keyed by stage with `totalEverCollected` tracked separately. `Village.nextRequiredTablet` exposes the single stage a village will accept; out-of-order tablets show a throttled rejection hint and stay in inventory. New `src/ui/TabletInventory.js` widget renders one slot per stage in this world, with a gold ring on the slot the nearest village wants next.
+- **Camera shake + time dilation juice pass.** New `addJuice(severity)` helper with light/medium/heavy/severe presets. Tablet pickup tones down to 'light'. `processGridEvents` accumulates lava-water reactions and fires medium on a small flood, heavy on a large one. `respawnGod` fires severe on death.
+- **Visible warrior upgrades + bodyguards.** New `src/civilisation/Warrior.js` defines per-stage procedural sprites (villager, clubber, spearman, archer, swordsman, mounted rider, arcanist) drawn from the village's element-tinted clothing colour. Village now spawns `WanderingWarrior` instances and wipes/respawns on stage advance so equipment refreshes. New `src/civilisation/Bodyguard.js` is a physics-driven escort that seeks a formation slot around the god, walks, jumps, and lifts off when stuck or when the god flies. `Village.canDispatchBodyguards()` requires stage 3+ and belief 60+. WorldScene runs a periodic dispatch loop, capping at three escorts and culling those whose origin loses the faith.
+- **Spell system + mouse controls.** New `src/spells/Spell.js` defines Bolt (line damage that carves soft terrain), Place (drops the god's primary element into the falling-sand sim), and Geas (belief surge on the nearest village). `SpellBook` gates the visible loadout by total tablets ever collected. `src/ui/SpellBar.js` shows three slots in the bottom-centre with gold ring on active and a cooldown sweep mask. Mouse wheel cycles, left click casts at the cursor's world position, 1/2/3 select directly.
+- **Rival god + combat values.** New `src/combat/Combat.js` is the single tunable table for HP, damage, cooldowns, and ranges. New `src/combat/EnemyGod.js` is a horned silhouette deity with HP bar and a tiny WANDER → SEEK → ENGAGE → FLEE state machine; lifts off when stuck or when the player is far above, fires shadow bolts on cooldown, retreats and regen-heals when low. `God.takeDamage` has 500 ms invuln and routes to `respawnGod` on death. Bolt spell hits the rival god via point-to-segment distance check. Bodyguards engage the rival in melee when within 12 tiles. WorldScene spawns one rival on the opposite hemisphere and shows a player HP gauge in the top-left HUD.
+- **Critter spawn regression non-bug.** Investigated and could not reproduce on a clean world load (37 critters spawned with `barrenFertile = 0.7`). Closed.
 
-Build verified clean (`npm run build`, 1.58 MB minified, 372 KB gzipped). The test world loads with five sky layers, 50 trees, 4 villages, 3 tablets. Critter count came back as 0 in the live verification step, which is flagged in the backlog.
+Build clean throughout (`npm run build`, ~1.61 MB minified, ~381 KB gzipped). Each item committed and pushed individually so `git log` is the timeline.
 
-### Suggested commit message for the uncommitted work
+## Backlog: next priorities
 
-```
-fix: surface snapping, sky overhaul, critter variety, particle equilibrium
+Combat exists but is shallow. Next session should put pressure on the new systems and balance them.
 
-- Trees and villages snap to actual topmost solid ground
-- ParallaxSky: 5 layers, element tinting, day/night sun-height cycle
-- Critters: per-element subtypes chosen deterministically by seed
-- GridSimulator: connected-body check + parity tiebreaker stops
-  single liquid tiles wobbling forever
-- WorldScene: upper sky ceiling clamp, ghost-tree foreground removed
-- Village buildings scaled 2.5x, wider stage sprawl
-```
+### A. Enemy warriors + populated battles
 
-## Backlog — Mike's latest brief (priority order)
-
-The next session should treat this as the working list. Each item has acceptance criteria. Don't mark anything done until it visibly works in preview.
-
-### A. Tablet glow effect
-
-- **Symptom:** tablets are nearly invisible in dark caves; the existing 0.15-alpha pulsing circle in `Tablet.createGlow` is too subtle.
-- **Acceptance:** a tablet is unmistakably visible from at least eight tiles away in pitch black. Use one or more of: brighter pulsing aura, vertical light shaft / godrays, particle motes orbiting the tablet, additive blend mode, a glyph pip above. When the god is within ~2 tiles, swell the glow and play a rising procedural shimmer via the sound engine.
-- **Files:** `src/civilisation/Tablet.js` (mostly `createGlow`), `src/sound/AmbienceEngine.js` for the proximity shimmer.
-
-### B. Coherent village upgrade gate
-
-- **Symptom:** villages can be upgraded out of order. A player carrying tablet 4 can hand it to a stage-2 village and skip stages.
+- **Why:** the rival god is currently a solo encounter. Bodyguards have a melee target but no peers. The world feels empty of conflict.
 - **Required behaviour:**
-  1. **Per-village stage tracking.** Each village exposes `nextRequiredTablet = stage + 1`. A village at stage 2 only accepts tablet 3.
-  2. **Player tablet inventory.** The god gets a `tablets` map (`{ 1: count, 2: count, ... }`). Picking up a tablet adds to inventory; it does not auto-deliver to the next village walked into.
-  3. **Delivery rule.** Walking into a village checks `god.tablets[village.nextRequiredTablet]`. If present, decrement, advance stage, run the upgrade animation. Otherwise show a transient hint ("Cael's Crossing isn't ready for tablet 4 yet — they need tablet 3 first").
-  4. **Tablet inventory UI.** Corner HUD with rows of tablet glyphs and counts. Highlight the one the nearest village wants.
-- **Files:** `src/civilisation/Tablet.js`, `src/civilisation/Village.js`, `src/god/God.js`, `src/scenes/WorldScene.js`, new `src/ui/TabletInventory.js`.
+  1. Rival villages spawn enemy warriors (use the existing `Warrior` module with a different clothing colour seed so they read as a different faction).
+  2. The rival god commands a small retinue that spawns near it on a slow timer (1 every ~8s up to a cap of 3).
+  3. Enemy warriors engage bodyguards in melee + use the existing combat values from `src/combat/Combat.js`.
+  4. Faction colour: pick a deliberately contrasting tint for the rival faction so they don't blend in with the player's villages.
+- **Files:** new `src/combat/EnemyWarrior.js` (or extend `Bodyguard.js` with a generic Combatant), updates to `Village.js` for hostile flag, `EnemyGod.js` for retinue spawn, `WorldScene.js` for collision/AI wiring.
 
-### C. Visible warrior upgrades and bodyguards
+### B. Combat balance pass
 
-- **Symptom:** the spec promises that each tablet stage produces visibly upgraded warriors; we currently only have generic walking villagers.
-- **Required behaviour:**
-  1. **Warrior class per stage.** Stage 2 club, 3 spear, 4 bow, 5 sword + shield, 6 mounted, 7 arcane / champion. Each gets a distinct procedural sprite (existing canvas-pixel approach is fine).
-  2. **Bodyguard escort.** Some upgraded warriors leave the village and follow the god as a small escort. Slot-based formation (e.g. three slots around the god). Bodyguards must:
-     - walk on terrain
-     - jump (same parabolic arc as the god)
-     - fly when the god flies, or hover up to follow
-     - pathfind around obstacles. A flow-field toward the god, falling back to brief flight when blocked, will do; full A* is overkill.
-  3. **Loyalty per village** drives whether bodyguards are sent at all. Low-belief villages refuse.
-- **Files:** new `src/civilisation/Warrior.js`, new `src/civilisation/Bodyguard.js`, new `src/utils/Pathfinding.js`, updates to `Village.js` and `WorldScene.js`.
+- **Why:** combat values are first-pass. Bolt damage 18 vs 120 enemy HP means ~7 hits to kill (~3.5 seconds at 500ms cooldown) which is reasonable but untested. Bodyguard melee per stage is guesswork.
+- **Tasks:**
+  1. Playtest a full kill of the rival god with bodyguards engaged. Tune `COMBAT.spells.boltDamage`, `COMBAT.enemyGod.maxHp`, melee damage by stage.
+  2. Test what happens when god dies: respawn HP reset works, but visual feedback could be louder.
+  3. Decide whether enemy bolts should also have a per-target invuln window or if 500ms is too lenient.
+- **Files:** `src/combat/Combat.js` only, ideally.
 
-### D. Camera shake and time dilation
+### C. Spell polish
 
-- **Already wired:** `GridSimulator` emits events for big interactions; `WorldScene` consumes them only for sound right now.
-- **Required behaviour:**
-  1. **Camera shake** on tablet pickup (gentle), spell cast (medium), explosion / lava-water reaction (heavy), god death (severe). Use `cam.shake(duration, intensity)`.
-  2. **Time dilation** for spell casts and dramatic moments. Slow simulation `dt` to 0.3× for ~150 ms, ease back to 1×. The grid simulator already accepts a dilated delta — wire WorldScene to multiply.
-- **Files:** `src/scenes/WorldScene.js`, possibly a tiny new `src/utils/Juice.js`.
+- **Right click as charged cast** (originally deferred). Decide flavour: held charge boosts bolt damage / radius, place spell drops a bigger cluster, geas boosts belief by more. Mike to sign off direction.
+- **Mana / cooldown HUD** is currently a sweep mask; should also show a numeric cooldown pip when partially down for spells with long cooldowns (geas at 4s).
+- **Spell visuals:** the bolt is a flat additive line. Could use a glowing sphere head + trailing particles. Place could telegraph a target reticle on hover.
 
-### E. Spell system + mouse controls
+### D. Tablet count vs village stage cap
 
-- **Required behaviour:**
-  1. **Mouse wheel** cycles selected spell.
-  2. **Left click** casts at the cursor. Right click as charged-cast modifier (confirm with Mike before adding).
-  3. **Spell loadout gates by tablets carried:** 0 tablets = no spells, 1 = 1 spell, 2 = 2 spells, 3+ = full loadout of three. The unlocks should track total tablets ever picked up, not current inventory.
-  4. **First spell candidates** (Mike to confirm flavour):
-     - **Bolt** — direct damage line, no cost, fast cooldown
-     - **Place** — drop a tile of the god's primary element (water/fire/earth/air) under the cursor; feeds straight into the simulation
-     - **Geas** — temporary belief boost on the village under the cursor
-  5. **Spell HUD** in the corner: three icon slots, active one highlighted, mana / cooldown bar.
-- **Files:** new `src/spells/Spell.js`, `src/spells/SpellBook.js`, `src/ui/SpellBar.js`, `src/scenes/WorldScene.js`.
+- Spec promises stages 2 to 7 (six tablets) but world only generates `TABLET_COUNT = 3` (stages 2 to 4). Decide whether to bump tablet count to 6 or keep it short for early playtests.
+- **Files:** `src/scenes/WorldScene.js` (TABLET_COUNT constant).
 
-### F. NPC enemy gods + NPC warriors
+### E. Bodyguard pathfinding upgrade
 
-- **Why:** spells and bodyguards need targets. Without enemies the new toys have nothing to do.
-- **Required behaviour:**
-  1. **Enemy god** as a roaming AI entity with the same movement repertoire as the player (walk, jump, fly, dig).
-  2. **Enemy warriors** spawned from rival villages, or from a portal incursion later.
-  3. **Combat values** — propose damage / HP numbers for Mike to sign off; never pick silently.
-  4. **AI behaviour tree** kept tiny: idle → seek → engage → flee, transitioning on HP and target distance.
-- **Recycle from SkyBaby / Soar:** Mike's earlier Phaser project has a robust enemy spawn + AI population system. Pull it across rather than reinvent. Files to mine (Mike to confirm path):
-  - `EnemySpawner` / `Population` / `BehaviorTree` modules
-  - steering behaviours (seek, flee, separation)
-  - HP / damage helpers
-- **Files:** new `src/combat/Enemy.js`, `EnemyGod.js`, `AiBrain.js`, `PopulationManager.js`.
+- Current bodyguard AI is steering + brief flight when stuck. Works for open terrain but fails in tight caves. Brief consideration: add a tile-graph BFS toward the god updated every ~500 ms, fall back to flight for unreachable targets.
+- **Files:** new `src/utils/Pathfinding.js`, `src/civilisation/Bodyguard.js`.
 
-### G. Critter spawn regression (newly observed)
-
-- During verification of the critter-variety change the live world reported `critters: 0` despite `barrenFertile = 0.7`. Possibly the spawn loop now bails out because the surface check is rejecting candidates after recent terrain changes, or `pickCritter` returned `undefined` for an edge case.
-- **Acceptance:** worlds with `barrenFertile > 0.3` reliably spawn at least 10 critters at start.
-- **Files:** `src/world/Critters.js`, possibly `src/world/WorldGenerator.js`.
-
-## Backlog — older items still outstanding
+## Backlog: older items still outstanding
 
 - **Web Worker for the falling-sand sim.** Currently runs on the main thread inside `GridSimulator.update`. Phase 2 was supposed to push it into a worker so the Phaser render loop never starves. Becomes visible at higher particle counts.
 - **SkyBaby sample integration.** Procedural sound bus works; what's missing is layering real samples (gong / magic / ambient bird) over the procedural foundation with element-driven filter envelopes. Reference architecture is Slumbr.
 - **Delete `src/world/ParallaxForeground.js`** or repurpose as a back-of-camera foliage band; right now it's unused dead code.
-- **Population dynamics balance pass.** Belief growth and decline curves were placeholder; they need playtesting once warriors and combat exist.
-- **Open spec questions in section 11 of `GODSTONE-game-design-spec.md`** — many systems still have deliberately unresolved details (spell costs, belief curves, combat values). Don't decide silently; flag and ask.
-- **Cosmetic particle pool.** Earlier handover proposed an `src/world/ParticleEngine.js` with a pre-allocated pool of ambient cosmetic particles (embers, leaves, mist, motes) keyed to element + biome + day/night. Still worth doing; it complements the simulation particles without competing with them.
+- **Population dynamics balance pass.** Belief growth and decline curves are placeholder; they need playtesting alongside the new combat loop.
+- **Open spec questions in section 11 of `GODSTONE-game-design-spec.md`.** Spell flavour, belief curves, combat values: don't decide silently, flag and ask.
 - **Biome bands within a world.** Horizontal partition into 3-5 biomes with their own tile tinting, vegetation density, cave frequency, particle emphasis. Was queued behind Phase 2.
 
 ## Architectural notes for the next session
 
-- **Module communication** runs through `core/EventBus.js` or shared scene state. Direct cross-module imports are a smell.
+- **Module communication** runs through `core/EventBus.js` or shared scene state. Direct cross-module imports are a smell. Combat is the main exception: `EnemyGod.takeDamage` is called directly from `Spell.cast` and `Bodyguard.update`. That's fine for v1; if it grows, route through an event bus.
+- **Combat tuning** lives in `src/combat/Combat.js`. Single source of truth: HP, damage, cooldowns, ranges, flee thresholds. Tweak there, not at call sites.
 - **Particle sim** lives in `src/world/GridSimulator.js`. Update is bottom-to-top with alternating x-direction per generation. The moved-flag `Uint8Array` is the ground truth for "did this cell already act this tick." Don't add new tile interactions without reading the existing `updateWater` / `updateSand` / `updateLava` for the conventions; in particular, the connected-body check is what stops the wobble bug from coming back.
+- **Minimap** is now a circular projection rebuilt from a pre-baked inverse lookup. The texture re-renders from the live grid every 250 ms via `Minimap.refreshTexture` so digs and lava flow show through. The forward projection helper `projectToScreen(tileX, tileY)` is shared with marker placement.
+- **Tablet inventory** is a count map (`god.tablets[stage] = count`) plus `god.totalEverCollected`. Use the latter for spell unlocks (only goes up). `god.consumeTablet(stage)` is the only way to spend.
+- **Spell system** lives in `src/spells/`. Spells are dumb objects with one `cast(scene, x, y)` method; the `SpellBook` owns the active selection and cooldowns. Adding a new spell is: define a class in `Spell.js`, register it in `SpellBook.allSpells`, append to `UNLOCK_ORDER`.
+- **Bodyguards** are dispatched via `WorldScene._updateBodyguards` on a 1s timer; only the closest qualifying village dispatches at a time, max three escorts. Each bodyguard owns its own physics body and follow AI; melee combat preempts formation seek when an enemy god is within 12 tiles.
 - **Sky** is anchored to the viewport (`scrollFactor 0`) with manual `tilePositionX/Y` driven by camera scroll. Do not put sky tileSprites in world space; the seam returns instantly.
 - **Surface snapping helper:** `WorldScene.snapToGround(grid, x, startY)` is the right pattern for any new entity that needs to sit on the ground. Use it for warriors, spawned NPCs, dropped items, everything.
 - **Skipping the creation UI in dev:**
   ```js
-  window.__godstone.scene.getScene('Creation').scene.start('World', {
-    params: { element1: 'water', element2: 'earth', elementRatio: 5,
-              skyCave: 0.5, barrenFertile: 0.7, sparseDense: 0.6, seed: 575308 }
-  })
+  const game = window.__godstone
+  const cs = game.scene.getScene('Creation')
+  cs.selectedElements = ['water', 'earth']
+  cs.elementRatio = 5
+  cs.sliders = { skyCave: 0.5, barrenFertile: 0.7, sparseDense: 0.6 }
+  cs.worldSeed = 575308
+  cs.launchWorld()
   ```
 - **British English** in code, comments, and UI. No em dashes. Sentence case for headings. No "this is not X, it is Y" reformulation patterns.
 
