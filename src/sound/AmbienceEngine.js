@@ -389,7 +389,7 @@ export default class AmbienceEngine {
     const dy = critter.sprite.y - cameraY
     const dist = Math.sqrt(dx * dx + dy * dy)
     const pan = Math.max(-1, Math.min(1, dx / 300))
-    const volume = Math.max(0, 1 - dist / range) * 0.15
+    const volume = Math.max(0, 1 - dist / range) * 0.6
 
     const element = CRITTER_ELEMENT[critter.typeName] || 'earth'
     this._playCritterOneShot(element, pan, volume)
@@ -445,7 +445,7 @@ export default class AmbienceEngine {
     osc.frequency.setValueAtTime(f0, now)
     osc.frequency.exponentialRampToValueAtTime(f0 * 0.3, now + 0.12)
     const env = ac.createGain()
-    env.gain.setValueAtTime(vol * 0.4, now)
+    env.gain.setValueAtTime(vol * 0.8, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.15)
     osc.connect(env).connect(dest)
     osc.start(now)
@@ -466,8 +466,8 @@ export default class AmbienceEngine {
     vibrato.connect(vibGain).connect(osc.frequency)
     const env = ac.createGain()
     env.gain.setValueAtTime(0, now)
-    env.gain.linearRampToValueAtTime(vol * 0.12, now + 0.08)
-    env.gain.setValueAtTime(vol * 0.12, now + 0.2)
+    env.gain.linearRampToValueAtTime(vol * 0.5, now + 0.08)
+    env.gain.setValueAtTime(vol * 0.5, now + 0.2)
     env.gain.linearRampToValueAtTime(0, now + 0.4)
     osc.connect(env).connect(dest)
     osc.start(now)
@@ -487,7 +487,7 @@ export default class AmbienceEngine {
     hp.frequency.value = 1500 + Math.random() * 2500
     hp.Q.value = 1
     const env = ac.createGain()
-    env.gain.setValueAtTime(vol * 0.3, now)
+    env.gain.setValueAtTime(vol * 0.7, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.015 + Math.random() * 0.01)
     src.connect(hp).connect(env).connect(dest)
     src.start(now)
@@ -571,11 +571,11 @@ export default class AmbienceEngine {
     const stage = closestVillage.stage || 1
 
     // Base murmur: squared falloff for natural attenuation
-    this._village.villageGain.gain.setTargetAtTime(proximity * proximity * 0.06, now, 0.3)
+    this._village.villageGain.gain.setTargetAtTime(proximity * proximity * 0.4, now, 0.3)
     // Tonal hum: grows with village stage
-    this._village.humGain.gain.setTargetAtTime(proximity * (stage / 7) * 0.02, now, 0.5)
+    this._village.humGain.gain.setTargetAtTime(proximity * (stage / 7) * 0.15, now, 0.5)
     // Campfire: stage 2+
-    this._village.fireGain.gain.setTargetAtTime(stage >= 2 ? proximity * 0.03 : 0, now, 0.3)
+    this._village.fireGain.gain.setTargetAtTime(stage >= 2 ? proximity * 0.2 : 0, now, 0.3)
   }
 
   // ============================================================
@@ -594,7 +594,7 @@ export default class AmbienceEngine {
     lp.frequency.value = 300 + Math.random() * 200
     lp.Q.value = 1
     const env = ac.createGain()
-    env.gain.setValueAtTime(0.08, now)
+    env.gain.setValueAtTime(0.5, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
     src.connect(lp).connect(env).connect(this.masterGain)
     src.start(now)
@@ -616,7 +616,7 @@ export default class AmbienceEngine {
     bp.frequency.value = freq
     bp.Q.value = 2
     const env = ac.createGain()
-    env.gain.setValueAtTime(0.04, now)
+    env.gain.setValueAtTime(0.3, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.04)
     src.connect(bp).connect(env).connect(this.masterGain)
     src.start(now)
@@ -634,7 +634,7 @@ export default class AmbienceEngine {
     bp.frequency.value = 400 + Math.random() * 300
     bp.Q.value = 0.8
     const env = ac.createGain()
-    env.gain.setValueAtTime(0.12, now)
+    env.gain.setValueAtTime(0.6, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
     src.connect(bp).connect(env).connect(this.masterGain)
     src.start(now)
@@ -653,7 +653,7 @@ export default class AmbienceEngine {
     bp.frequency.exponentialRampToValueAtTime(900, now + 0.15)
     bp.Q.value = 1.5
     const env = ac.createGain()
-    env.gain.setValueAtTime(0.06, now)
+    env.gain.setValueAtTime(0.4, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.2)
     src.connect(bp).connect(env).connect(this.masterGain)
     src.start(now)

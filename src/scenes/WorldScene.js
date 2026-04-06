@@ -395,6 +395,7 @@ export default class WorldScene extends Phaser.Scene {
       const dist = Math.sqrt(dx * dx + dy * dy)
       village.updateBelief(dist, delta)
       village.updatePopulation(delta)
+      village.updateVillagers(delta)
     }
 
     // Population HUD (only redraw when the number changes)
