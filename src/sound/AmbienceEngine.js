@@ -455,6 +455,66 @@ export default class AmbienceEngine {
     src.start()
   }
 
+  // Crystalline rising shimmer for tablet proximity. Pure synth: a
+  // staggered pentatonic chord of sine notes that ramp slightly upward,
+  // plus a high noise sparkle. No samples needed, plays before the
+  // sample bank is ready.
+  playTabletShimmer() {
+    if (!this.initialized || !this.ctx || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+
+    // Pentatonic chord (C5-style) — gives that ancient/mystical feel
+    const baseFreqs = [523.25, 659.25, 783.99, 987.77]
+    const masterGain = ac.createGain()
+    masterGain.gain.value = 0.22
+    masterGain.connect(this.proceduralGain)
+
+    baseFreqs.forEach((freq, i) => {
+      const t = now + i * 0.045
+      const osc = ac.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(freq, t)
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.012, t + 0.25)
+      const g = ac.createGain()
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(0.6, t + 0.012)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85)
+      osc.connect(g).connect(masterGain)
+      osc.start(t)
+      osc.stop(t + 0.95)
+
+      // Octave shimmer above each note for that brushed-glass top end
+      const harm = ac.createOscillator()
+      harm.type = 'sine'
+      harm.frequency.setValueAtTime(freq * 2, t)
+      const hg = ac.createGain()
+      hg.gain.setValueAtTime(0.0001, t)
+      hg.gain.exponentialRampToValueAtTime(0.18, t + 0.015)
+      hg.gain.exponentialRampToValueAtTime(0.0001, t + 0.5)
+      harm.connect(hg).connect(masterGain)
+      harm.start(t)
+      harm.stop(t + 0.6)
+    })
+
+    // High sparkle: noise through a tight bandpass at ~6 kHz
+    if (this._noiseBuffer) {
+      const noiseSrc = ac.createBufferSource()
+      noiseSrc.buffer = this._noiseBuffer
+      const filt = ac.createBiquadFilter()
+      filt.type = 'bandpass'
+      filt.frequency.value = 6000
+      filt.Q.value = 8
+      const ng = ac.createGain()
+      ng.gain.setValueAtTime(0.0001, now)
+      ng.gain.exponentialRampToValueAtTime(0.18, now + 0.02)
+      ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.5)
+      noiseSrc.connect(filt).connect(ng).connect(masterGain)
+      noiseSrc.start(now)
+      noiseSrc.stop(now + 0.6)
+    }
+  }
+
   // Call once when the world is created. Picks sounds and sets volumes
   // based on element pair, ratio, and seed.
   setWorld(params) {

@@ -543,6 +543,13 @@ export default class WorldScene extends Phaser.Scene {
     // Foliage update (wind sway + destroy burned trees)
     if (this.foliageRenderer) this.foliageRenderer.update(dilatedDelta)
 
+    // Tablets: orbiting motes + proximity glow swell + shimmer cue
+    if (this.tablets) {
+      for (const t of this.tablets) {
+        if (t.update) t.update(dilatedDelta, this.god.sprite, this.ambience)
+      }
+    }
+
     // Minimap (delta lets it throttle the live texture refresh)
     if (this.minimap) this.minimap.update(this.god.sprite, dilatedDelta)
 
