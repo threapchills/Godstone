@@ -125,6 +125,13 @@ export default class AmbienceEngine {
     low.connect(mid); mid.connect(high); high.connect(limiter)
     limiter.connect(ac.destination)
     this.eq = { low, mid, high }
+
+    // Separate gain for procedural layers (critter, village, movement).
+    // Bypasses masterGain so transient one-shots aren't crushed by the
+    // pad-level attenuation (0.133). Feeds the same limiter for safety.
+    this.proceduralGain = ac.createGain()
+    this.proceduralGain.gain.value = 0.55
+    this.proceduralGain.connect(limiter)
   }
 
   // --- Per-element channels ---
@@ -402,7 +409,7 @@ export default class AmbienceEngine {
     const ac = this.ctx
     const panner = ac.createStereoPanner()
     panner.pan.value = pan
-    panner.connect(this.masterGain)
+    panner.connect(this.proceduralGain)
 
     switch (element) {
       case 'fire': this._fireCrackle(volume, panner); break
@@ -535,7 +542,7 @@ export default class AmbienceEngine {
     noiseSrc.connect(bp).connect(villageGain)
     hum.connect(humGain).connect(villageGain)
     fireSrc.connect(fireBP).connect(fireGain).connect(villageGain)
-    villageGain.connect(this.masterGain)
+    villageGain.connect(this.proceduralGain)
 
     noiseSrc.start()
     hum.start()
@@ -596,7 +603,7 @@ export default class AmbienceEngine {
     const env = ac.createGain()
     env.gain.setValueAtTime(0.5, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
-    src.connect(lp).connect(env).connect(this.masterGain)
+    src.connect(lp).connect(env).connect(this.proceduralGain)
     src.start(now)
     src.stop(now + 0.15)
   }
@@ -618,7 +625,7 @@ export default class AmbienceEngine {
     const env = ac.createGain()
     env.gain.setValueAtTime(0.3, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.04)
-    src.connect(bp).connect(env).connect(this.masterGain)
+    src.connect(bp).connect(env).connect(this.proceduralGain)
     src.start(now)
     src.stop(now + 0.06)
   }
@@ -636,7 +643,7 @@ export default class AmbienceEngine {
     const env = ac.createGain()
     env.gain.setValueAtTime(0.6, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
-    src.connect(bp).connect(env).connect(this.masterGain)
+    src.connect(bp).connect(env).connect(this.proceduralGain)
     src.start(now)
     src.stop(now + 0.35)
   }
@@ -655,7 +662,7 @@ export default class AmbienceEngine {
     const env = ac.createGain()
     env.gain.setValueAtTime(0.4, now)
     env.gain.exponentialRampToValueAtTime(0.001, now + 0.2)
-    src.connect(bp).connect(env).connect(this.masterGain)
+    src.connect(bp).connect(env).connect(this.proceduralGain)
     src.start(now)
     src.stop(now + 0.25)
   }
