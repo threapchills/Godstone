@@ -59,7 +59,31 @@ export default class AmbienceEngine {
 
   async _doInit() {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)()
-    if (this.ctx.state === 'suspended') await this.ctx.resume()
+
+    // Browsers block AudioContext until a user gesture. If suspended,
+    // hook into the first click/keydown to resume rather than failing silently.
+    if (this.ctx.state === 'suspended') {
+      const tryResume = async () => {
+        try { await this.ctx.resume() } catch { /* noop */ }
+      }
+      await tryResume()
+      if (this.ctx.state === 'suspended') {
+        const unlock = async () => {
+          await tryResume()
+          if (this.ctx.state === 'running') {
+            document.removeEventListener('click', unlock)
+            document.removeEventListener('keydown', unlock)
+            // Now that context is running, start playback if world was already set
+            if (this.params && !this._playbackStarted) {
+              this._playbackStarted = true
+              this.setWorld(this.params)
+            }
+          }
+        }
+        document.addEventListener('click', unlock, { once: false })
+        document.addEventListener('keydown', unlock, { once: false })
+      }
+    }
 
     this._buildMasterChain()
     this._buildChannels()
@@ -258,8 +282,9 @@ export default class AmbienceEngine {
   // Call once when the world is created. Picks sounds and sets volumes
   // based on element pair, ratio, and seed.
   setWorld(params) {
-    if (!this.initialized) { this.params = params; return }
     this.params = params
+    if (!this.initialized || this.ctx?.state !== 'running') return
+    this._playbackStarted = true
 
     const el1 = params.element1
     const el2 = params.element2
