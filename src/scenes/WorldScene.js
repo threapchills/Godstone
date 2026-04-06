@@ -9,6 +9,8 @@ import Bodyguard from '../civilisation/Bodyguard.js'
 import Tablet from '../civilisation/Tablet.js'
 import Minimap from '../ui/Minimap.js'
 import TabletInventory from '../ui/TabletInventory.js'
+import SpellBar from '../ui/SpellBar.js'
+import SpellBook from '../spells/SpellBook.js'
 import PortalHenge from '../world/PortalHenge.js'
 import ParallaxSky from '../ui/ParallaxSky.js'
 import CritterManager from '../world/Critters.js'
@@ -212,6 +214,11 @@ export default class WorldScene extends Phaser.Scene {
     // Each holds a slot index that maps to a position relative to the god.
     this.bodyguards = []
     this._bodyguardCheckTimer = 0
+
+    // Spells: book + bar HUD. Unlocks driven by total tablets ever picked up.
+    this.spellBook = new SpellBook(params)
+    this.spellBar = new SpellBar(this)
+    this._wireSpellInput()
 
     // Minimap
     this.minimap = new Minimap(this, this.worldGrid, params)
@@ -557,6 +564,13 @@ export default class WorldScene extends Phaser.Scene {
     // Bodyguards: dispatch + update + cleanup
     this._updateBodyguards(dilatedDelta)
 
+    // Spells: tick cooldowns + refresh HUD
+    if (this.spellBook) {
+      this.spellBook.setUnlockCount(this.god.totalEverCollected)
+      this.spellBook.update(dilatedDelta)
+      if (this.spellBar) this.spellBar.update(this.spellBook)
+    }
+
     // Population HUD (only redraw when the number changes)
     const totalPop = this.villages.reduce((sum, v) => sum + Math.floor(v.population), 0)
     if (totalPop !== this._prevTotalPop) {
@@ -758,6 +772,36 @@ export default class WorldScene extends Phaser.Scene {
   shutdown() {
     if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
+  }
+
+  // ── Spell input ──────────────────────────────────────
+  _wireSpellInput() {
+    // Mouse wheel cycles spells, left click casts at the cursor's
+    // world position. Pointer events use the camera's world transform
+    // so the cast lands where the player actually clicks.
+    this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+      if (!this.spellBook) return
+      this.spellBook.cycle(deltaY > 0 ? 1 : -1)
+    })
+
+    this.input.on('pointerdown', (pointer) => {
+      if (!this.spellBook || pointer.button !== 0) return
+      const wp = pointer.positionToCamera(this.cameras.main)
+      this.spellBook.cast(this, wp.x, wp.y)
+    })
+
+    // Number keys 1/2/3 for direct slot selection — quality of life
+    this.input.keyboard.on('keydown-ONE', () => this.spellBook?.cycle(0 - this.spellBook.activeIndex))
+    this.input.keyboard.on('keydown-TWO', () => {
+      if (!this.spellBook) return
+      const list = this.spellBook.unlockedSpells()
+      if (list.length >= 2) this.spellBook.activeIndex = 1
+    })
+    this.input.keyboard.on('keydown-THREE', () => {
+      if (!this.spellBook) return
+      const list = this.spellBook.unlockedSpells()
+      if (list.length >= 3) this.spellBook.activeIndex = 2
+    })
   }
 
   // ── Bodyguard dispatch & update ──────────────────────
