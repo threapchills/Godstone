@@ -16,14 +16,15 @@ export default class SpellBook {
       place: new PlaceSpell(params.element1),
       geas: new GeasSpell(),
     }
-    this.unlockedCount = 0 // updated each frame from God.totalEverCollected
+    this.unlockedCount = 0 // updated each frame from God.highestTablet
     this.activeIndex = 0
   }
 
-  // unlockCount: how many slots are visible. Derived from total tablets
-  // ever picked up: 0 = none, 1 = bolt, 2 = bolt+place, 3+ = full loadout.
-  setUnlockCount(totalEverCollected) {
-    this.unlockedCount = Math.min(3, totalEverCollected)
+  // unlockCount: how many slots are visible. Derived from the god's
+  // highest tablet level (since tablets are persistent and incremental):
+  // 0 = none, 1 = bolt, 2 = bolt+place, 3+ = full loadout.
+  setUnlockCount(highestTablet) {
+    this.unlockedCount = Math.min(3, highestTablet)
   }
 
   unlockedSpells() {

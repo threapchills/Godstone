@@ -29,10 +29,11 @@ export default class God {
     // State
     this.isInLiquid = false
     this.facingRight = true
-    // tablets is a count map keyed by stage: { 2: 1, 3: 0, 4: 2, ... }
-    // totalEverCollected only ever increments; used by spell unlocks.
-    this.tablets = {}
-    this.totalEverCollected = 0
+    // Tablets are persistent and level-agnostic. Each pickup increments
+    // highestTablet by one; the first one found is level 1, second is
+    // level 2, and so on. A village at stage N can advance whenever the
+    // god's highestTablet >= N. Tablets are never consumed.
+    this.highestTablet = 0
 
     // Combat
     this.maxHp = COMBAT.god.maxHp
@@ -285,9 +286,12 @@ export default class God {
     }
   }
 
-  collectTablet(stage) {
-    this.tablets[stage] = (this.tablets[stage] || 0) + 1
-    this.totalEverCollected++
+  // Pick up a tablet. Each pickup is automatically the next level in
+  // sequence: the first you find is level 1, the second is level 2, etc.
+  // Returns the level granted, useful for HUD messaging.
+  collectTablet() {
+    this.highestTablet++
+    return this.highestTablet
   }
 
   // Damage with brief invulnerability so a sustained beam doesn't drain
@@ -305,21 +309,6 @@ export default class God {
       this.hp = this.maxHp
       if (this.scene.respawnGod) this.scene.respawnGod()
     }
-  }
-
-  // Try to spend a tablet of the given stage. Returns true on success.
-  consumeTablet(stage) {
-    const have = this.tablets[stage] || 0
-    if (have <= 0) return false
-    this.tablets[stage] = have - 1
-    return true
-  }
-
-  // Convenience: total tablets currently in inventory across all stages.
-  get tabletInventoryCount() {
-    let n = 0
-    for (const k in this.tablets) n += this.tablets[k]
-    return n
   }
 
   get position() {

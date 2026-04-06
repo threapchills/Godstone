@@ -1,8 +1,10 @@
 import { GAME_WIDTH, TILE_SIZE } from '../core/Constants.js'
 
-// Corner HUD: a column of tablet glyphs with carry counts. The slot
-// the nearest village currently wants is ringed in gold so the player
-// always knows what to fetch next.
+// Corner HUD: a row of tablet glyphs, one per tablet that exists in
+// the world. Tablets are persistent and level-agnostic, so each slot
+// is a numbered level (1, 2, 3, ...). Slots light up as the player
+// collects them in order. The slot the nearest village currently
+// needs is ringed in gold.
 
 const SLOT_W = 28
 const SLOT_H = 28
@@ -10,9 +12,9 @@ const PADDING_X = 12
 const PADDING_Y = 96
 
 export default class TabletInventory {
-  constructor(scene, stages) {
+  constructor(scene, slotCount) {
     this.scene = scene
-    this.stages = [...stages].sort((a, b) => a - b)
+    this.slotCount = slotCount
     this.slots = []
 
     const baseX = PADDING_X
@@ -27,8 +29,9 @@ export default class TabletInventory {
       strokeThickness: 2,
     }).setScrollFactor(0).setDepth(50)
 
-    // Build a slot per known stage
-    this.stages.forEach((stage, i) => {
+    // One slot per tablet that exists in the world. Level is positional.
+    for (let i = 0; i < slotCount; i++) {
+      const level = i + 1
       const x = baseX + i * (SLOT_W + 4)
       const y = baseY
 
@@ -37,12 +40,12 @@ export default class TabletInventory {
         .setScrollFactor(0)
         .setDepth(50)
 
-      const glyph = this._ensureGlyph(stage)
+      const glyph = this._ensureGlyph(level)
       const icon = scene.add.image(x + SLOT_W / 2, y + SLOT_H / 2 - 2, glyph)
         .setScrollFactor(0)
         .setDepth(51)
 
-      const label = scene.add.text(x + SLOT_W - 4, y + SLOT_H - 4, '0', {
+      const label = scene.add.text(x + SLOT_W - 4, y + SLOT_H - 4, String(level), {
         fontFamily: 'Georgia, serif',
         fontSize: '10px',
         color: '#ffffff',
@@ -50,40 +53,38 @@ export default class TabletInventory {
         strokeThickness: 2,
       }).setOrigin(1, 1).setScrollFactor(0).setDepth(52)
 
-      this.slots.push({ stage, back, icon, label, glow: null })
-    })
+      this.slots.push({ level, back, icon, label })
+    }
   }
 
-  // Build a tiny canvas glyph per tablet stage so they read distinct.
-  // Stage 2: dot. 3: vertical bar. 4: triangle. 5: square. 6: pentagon. 7: star.
-  _ensureGlyph(stage) {
-    const key = `tablet-glyph-${stage}`
+  // Build a small canvas glyph per level. Different shapes per level
+  // give the slots distinct silhouettes at a glance.
+  _ensureGlyph(level) {
+    const key = `tablet-glyph-lvl-${level}`
     if (this.scene.textures.exists(key)) return key
     const c = document.createElement('canvas')
     c.width = 16
     c.height = 16
     const ctx = c.getContext('2d')
     ctx.fillStyle = '#9affe6'
-    ctx.strokeStyle = '#003322'
-    ctx.lineWidth = 1
 
     const cx = 8, cy = 8
-    if (stage <= 2) {
+    if (level === 1) {
       ctx.beginPath()
       ctx.arc(cx, cy, 4, 0, Math.PI * 2)
       ctx.fill()
-    } else if (stage === 3) {
+    } else if (level === 2) {
       ctx.fillRect(cx - 1, 2, 2, 12)
-    } else if (stage === 4) {
+    } else if (level === 3) {
       ctx.beginPath()
       ctx.moveTo(cx, 2)
       ctx.lineTo(14, 13)
       ctx.lineTo(2, 13)
       ctx.closePath()
       ctx.fill()
-    } else if (stage === 5) {
+    } else if (level === 4) {
       ctx.fillRect(3, 3, 10, 10)
-    } else if (stage === 6) {
+    } else if (level === 5) {
       // Pentagon
       ctx.beginPath()
       for (let i = 0; i < 5; i++) {
@@ -96,7 +97,7 @@ export default class TabletInventory {
       ctx.closePath()
       ctx.fill()
     } else {
-      // Star
+      // Star (level 6+)
       ctx.beginPath()
       for (let i = 0; i < 10; i++) {
         const a = -Math.PI / 2 + (i * Math.PI) / 5
@@ -113,29 +114,25 @@ export default class TabletInventory {
     return key
   }
 
-  // Drive the HUD from God state + the nearest village's wanted stage.
-  // wantedStage may be null when no village is in range or all are maxed.
-  update(godTablets, wantedStage) {
+  // Drive the HUD from the god's highest collected tablet level + the
+  // nearest village's wanted level. wantedLevel may be null when no
+  // village is in range or all are maxed out.
+  update(highestTablet, wantedLevel) {
     for (const slot of this.slots) {
-      const count = godTablets[slot.stage] || 0
-      slot.label.setText(String(count))
+      const isOwned = highestTablet >= slot.level
+      const isWanted = wantedLevel === slot.level
 
-      const isWanted = wantedStage === slot.stage
-      const isHeld = count > 0
-
-      // Subtle visual states: held tablets glow soft teal, the wanted
-      // slot rings gold, empty slots fade.
       if (isWanted) {
         slot.back.setStrokeStyle(2, 0xdaa520, 1)
-        slot.icon.setAlpha(1)
+        slot.icon.setAlpha(isOwned ? 1 : 0.55)
         slot.icon.setScale(1.1)
-      } else if (isHeld) {
+      } else if (isOwned) {
         slot.back.setStrokeStyle(1, 0x9affe6, 0.9)
         slot.icon.setAlpha(1)
         slot.icon.setScale(1)
       } else {
         slot.back.setStrokeStyle(1, 0x444444, 0.6)
-        slot.icon.setAlpha(0.35)
+        slot.icon.setAlpha(0.3)
         slot.icon.setScale(1)
       }
     }

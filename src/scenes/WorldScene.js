@@ -119,11 +119,12 @@ export default class WorldScene extends Phaser.Scene {
       excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
     }
 
-    // Place multiple tablets underground
+    // Place multiple tablets underground. They're generic at world gen;
+    // each pickup is the next tablet level in the player's collection.
     this.tablets = []
     for (let i = 0; i < TABLET_COUNT; i++) {
       const pos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng)
-      const tablet = new Tablet(this, pos.x, pos.y, i + 2)
+      const tablet = new Tablet(this, pos.x, pos.y)
       this.tablets.push(tablet)
 
       // Pickup zone for each tablet
@@ -205,11 +206,10 @@ export default class WorldScene extends Phaser.Scene {
     // HUD
     this.createHUD(params)
 
-    // Tablet inventory widget; knows about every tablet stage that
-    // exists in this world (plus the maximum stage so the trailing
-    // slots are visible as locked).
-    const stagesInWorld = Array.from(new Set(this.tablets.map(t => t.stage))).sort((a, b) => a - b)
-    this.tabletInventory = new TabletInventory(this, stagesInWorld)
+    // Tablet inventory widget. One slot per tablet that exists in the
+    // world; level is purely positional (1, 2, 3, ...). Slots light up
+    // as the player collects tablets in order.
+    this.tabletInventory = new TabletInventory(this, this.tablets.length)
 
     // Bodyguards: dispatched escort entities, max 3 active at a time.
     // Each holds a slot index that maps to a position relative to the god.
@@ -413,12 +413,12 @@ export default class WorldScene extends Phaser.Scene {
   onTabletPickup(tablet) {
     if (!tablet || tablet.collected) return
     if (tablet.collect()) {
-      this.god.collectTablet(tablet.stage)
-      this.tabletHUD.setText(`Tablets: ${this.god.tabletInventoryCount}`)
+      const level = this.god.collectTablet()
+      this.tabletHUD.setText(`Tablets: ${this.god.highestTablet}`)
       if (tablet._minimapDot) tablet._minimapDot.setVisible(false)
-      this.showMessage(`Ancient tablet ${tablet.stage} found! Teach it to your villages.`)
+      this.showMessage(`Ancient tablet found. It is the level ${level} tablet.`)
 
-      this.hintText.setText('Visit a village ready for this tablet')
+      this.hintText.setText('Visit your villages to share this knowledge')
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
 
@@ -427,20 +427,24 @@ export default class WorldScene extends Phaser.Scene {
     }
   }
 
+  // Walk-in delivery. Tablets are persistent, so a single visit can
+  // chain every upgrade the player's collection allows. The animation
+  // staggers each step by ~1s so the village climbs from stage 1 → N
+  // with breathing room between rebuilds.
   onVillageProximity(village) {
     if (!village || village.isReceiving) return
-    const need = village.nextRequiredTablet
-    if (need == null) return // village has reached max stage
+    if (village.stage >= 7) return // already maxed
 
-    // Player must carry the exact tablet this village wants next.
-    // Walk-ins with the wrong tablet get a transient hint.
-    if (!village.canAccept(this.god.tablets)) {
+    if (!village.canAccept(this.god.highestTablet)) {
       // Throttle the rejection hint per-village so it doesn't spam every frame
       const now = this.time.now
       if (!village._lastRejectionHint || now - village._lastRejectionHint > 4000) {
         village._lastRejectionHint = now
-        if (this.god.tabletInventoryCount > 0) {
-          this.showMessage(`${village.name} isn't ready for that tablet; they need tablet ${need} first.`, 1800)
+        if (this.god.highestTablet > 0) {
+          const need = village.nextRequiredTablet
+          this.showMessage(`${village.name} needs the level ${need} tablet first.`, 1800)
+        } else {
+          this.showMessage(`${village.name} is waiting for ancient knowledge.`, 1800)
         }
       }
       return
@@ -449,38 +453,39 @@ export default class WorldScene extends Phaser.Scene {
     // Lock village so overlaps during the sequence don't re-trigger
     village.isReceiving = true
 
-    // Consume from inventory immediately so a second village in range
-    // can't double-spend the same tablet.
-    this.god.consumeTablet(need)
-    this.tabletHUD.setText(`Tablets: ${this.god.tabletInventoryCount}`)
+    // Determine how many stages we can advance in this single walk-in
+    const startStage = village.stage
+    const maxStage = Math.min(7, this.god.highestTablet + 1)
+    const upgrades = maxStage - startStage
+    if (upgrades <= 0) {
+      village.isReceiving = false
+      return
+    }
 
-    // Single-tablet teach (the new gate is one-at-a-time)
-    const newTablets = [{ stage: need }]
-    newTablets.forEach((tablet, i) => {
+    // Sequenced upgrades, 1-second beats so each rebuild has air
+    for (let i = 0; i < upgrades; i++) {
       this.time.delayedCall(i * 1000, () => {
-        if (village.receiveTablet(tablet.stage)) {
+        const newStage = village.receiveTablet()
+        if (newStage != null) {
           if (this.ambience) this.ambience.playGong()
-          this.showMessage(
-            `${village.name} learns tablet ${tablet.stage}!`,
-            900
-          )
+          this.showMessage(`${village.name} reaches stage ${newStage}.`, 900)
         }
 
-        // After the last tablet in the sequence, update HUD and unlock
-        if (i === newTablets.length - 1) {
+        // Final beat: unlock proximity, refresh enlightened count, hint
+        if (i === upgrades - 1) {
           village.isReceiving = false
 
-          const advanced = this.villages.filter(v => v.tabletsReceived.size > 0).length
+          const advanced = this.villages.filter(v => v.stage > 1).length
           this.villageHUD.setText(`Villages: ${this.villages.length} (${advanced} enlightened)`)
 
-          this.hintText.setText('Spread knowledge to all villages')
+          this.hintText.setText('Spread knowledge to every village')
           this.hintText.setAlpha(1)
           this.time.delayedCall(5000, () => {
             this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
           })
         }
       })
-    })
+    }
   }
 
   update(time, delta) {
@@ -577,7 +582,7 @@ export default class WorldScene extends Phaser.Scene {
     // Tablet inventory HUD: highlights the slot the closest village wants
     if (this.tabletInventory) {
       const wanted = nearestVillage ? nearestVillage.nextRequiredTablet : null
-      this.tabletInventory.update(this.god.tablets, wanted)
+      this.tabletInventory.update(this.god.highestTablet, wanted)
     }
 
     // Bodyguards: dispatch + update + cleanup
@@ -588,7 +593,7 @@ export default class WorldScene extends Phaser.Scene {
 
     // Spells: tick cooldowns + refresh HUD
     if (this.spellBook) {
-      this.spellBook.setUnlockCount(this.god.totalEverCollected)
+      this.spellBook.setUnlockCount(this.god.highestTablet)
       this.spellBook.update(dilatedDelta)
       if (this.spellBar) this.spellBar.update(this.spellBook)
     }
@@ -605,7 +610,7 @@ export default class WorldScene extends Phaser.Scene {
     const totalPop = this.villages.reduce((sum, v) => sum + Math.floor(v.population), 0)
     if (totalPop !== this._prevTotalPop) {
       this._prevTotalPop = totalPop
-      const enlightened = this.villages.filter(v => v.tabletsReceived.size > 0).length
+      const enlightened = this.villages.filter(v => v.stage > 1).length
       let hudText = `Villages: ${this.villages.length}`
       if (enlightened > 0) hudText += ` (${enlightened} enlightened)`
       hudText += ` · Pop: ${totalPop}`

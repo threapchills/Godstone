@@ -185,7 +185,6 @@ export default class Village {
     this.population = 5
     this.fertility = params.barrenFertile ?? 0.5
     this.name = generateVillageName(params)
-    this.tabletsReceived = new Set()
     this.isReceiving = false
     this.params = params
 
@@ -355,19 +354,20 @@ export default class Village {
 
   // ── Tablet reception ────────────────────────────────
 
-  // The single tablet stage this village will accept next. Stage 1 needs
-  // tablet 2, stage 2 needs tablet 3, and so on. Returns null once the
-  // village has reached the max stage and won't accept any more.
+  // The tablet level this village needs to advance from its current
+  // stage. A stage 1 village needs the level 1 tablet, stage 2 needs
+  // level 2, and so on. Returns null once the village is maxed out.
   get nextRequiredTablet() {
-    return this.stage >= 7 ? null : this.stage + 1
+    return this.stage >= 7 ? null : this.stage
   }
 
-  // Does the god currently carry the tablet this village wants?
-  // godTablets is the count map { 2: n, 3: n, ... } from God.js.
-  canAccept(godTablets) {
+  // Can the god's current tablet collection upgrade this village?
+  // highestTablet is the integer count of tablets the god has ever
+  // picked up (since tablets are persistent and incremental in level).
+  canAccept(highestTablet) {
     const need = this.nextRequiredTablet
     if (need == null) return false
-    return (godTablets[need] || 0) > 0
+    return highestTablet >= need
   }
 
   // Belief gate for sending escorts. Stage 3+ villages have warriors
@@ -378,15 +378,12 @@ export default class Village {
     return this.stage >= 3 && this.belief >= 60
   }
 
-  // Consume the required tablet, advance the stage, rebuild buildings.
-  // Returns the stage that was learned, or null if nothing happened.
-  receiveTablet(stage) {
-    const need = this.nextRequiredTablet
-    if (need == null || stage !== need) return null
-    if (this.tabletsReceived.has(stage)) return null
-
-    this.tabletsReceived.add(stage)
-    this.stage = Math.min(this.stage + 1, 7)
+  // Advance one stage. Caller is responsible for checking canAccept
+  // first; this method just performs the upgrade and feedback.
+  // Returns the new stage, or null if already maxed.
+  receiveTablet() {
+    if (this.stage >= 7) return null
+    this.stage += 1
     this.belief = Math.min(100, this.belief + 25)
     this.population += 3
     this.updateBeliefBar()
@@ -408,7 +405,7 @@ export default class Village {
       })
     }
 
-    return stage
+    return this.stage
   }
 
   // ── Population dynamics ─────────────────────────────

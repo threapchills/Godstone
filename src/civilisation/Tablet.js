@@ -14,11 +14,12 @@ const SHAFT_HEIGHT = TILE_SIZE * 12
 const MOTE_COUNT = 5
 
 export default class Tablet {
-  constructor(scene, tileX, tileY, stage) {
+  constructor(scene, tileX, tileY) {
     this.scene = scene
     this.tileX = tileX
     this.tileY = tileY
-    this.stage = stage // which civilisational stage this unlocks
+    // Tablets are generic at world gen; the level the player gets is
+    // determined by pickup order, not by which one they happen to find.
     this.collected = false
     this._proximate = false
     this._motePhase = Math.random() * Math.PI * 2
