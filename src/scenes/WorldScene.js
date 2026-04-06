@@ -505,7 +505,7 @@ export default class WorldScene extends Phaser.Scene {
     }
 
     // God movement
-    this.god.update(this.worldGrid, time)
+    this.god.update(this.worldGrid, time, dilatedDelta)
 
     // Horizontal world wrapping
     const worldPixelWidth = WORLD_WIDTH * TILE_SIZE
@@ -573,6 +573,9 @@ export default class WorldScene extends Phaser.Scene {
       village.updateBelief(dist, dilatedDelta)
       village.updatePopulation(dilatedDelta)
       village.updateVillagers(dilatedDelta)
+      // Re-snap buildings to the ground beneath them so terraforming
+      // doesn't leave huts hovering in mid-air. Cheap (a few buildings).
+      village.updateGrounding()
       if (village.nextRequiredTablet != null && dist < nearestVillageDist) {
         nearestVillageDist = dist
         nearestVillage = village
@@ -595,7 +598,7 @@ export default class WorldScene extends Phaser.Scene {
     if (this.spellBook) {
       this.spellBook.setUnlockCount(this.god.highestTablet)
       this.spellBook.update(dilatedDelta)
-      if (this.spellBar) this.spellBar.update(this.spellBook)
+      if (this.spellBar) this.spellBar.update(this.spellBook, this.god)
     }
 
     // HP HUD

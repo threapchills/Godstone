@@ -39,6 +39,14 @@ export default class God {
     this.maxHp = COMBAT.god.maxHp
     this.hp = this.maxHp
     this._lastDamageTime = 0
+
+    // Mana: enough for one of each spell (3 total). Regenerates while
+    // the god is moving (walking, flying, falling). Full regen from
+    // empty takes about two minutes of constant motion.
+    this.maxMana = 3
+    this.mana = this.maxMana
+    this._lastManaPosX = 0
+    this._lastManaPosY = 0
     this.lastFlapTime = 0
     this.lastDigTime = 0
     this.coyoteTimer = 0
@@ -65,9 +73,21 @@ export default class God {
     this.sprite.setDepth(10)
   }
 
-  update(worldGrid, time) {
+  update(worldGrid, time, delta = 16) {
     const body = this.sprite.body
     const onGround = body.blocked.down
+
+    // Mana regen tied to actual movement (any displacement counts).
+    // Stationary god gets nothing; this rewards exploration.
+    const dx = this.sprite.x - this._lastManaPosX
+    const dy = this.sprite.y - this._lastManaPosY
+    const moved = (dx * dx + dy * dy) > 0.25
+    if (moved && this.mana < this.maxMana) {
+      // Full bar (3 mana) regenerates over ~120 seconds of motion
+      this.mana = Math.min(this.maxMana, this.mana + (3 / 120) * (delta / 1000))
+    }
+    this._lastManaPosX = this.sprite.x
+    this._lastManaPosY = this.sprite.y
 
     // Landing detection
     if (onGround && !this.wasOnGround) {

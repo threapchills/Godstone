@@ -9,7 +9,8 @@ import { GAME_WIDTH, TILE_SIZE } from '../core/Constants.js'
 const SLOT_W = 28
 const SLOT_H = 28
 const PADDING_X = 12
-const PADDING_Y = 96
+// Sits below the HP gauge column (top-left HUD ends at y ≈ 100)
+const PADDING_Y = 122
 
 export default class TabletInventory {
   constructor(scene, slotCount) {

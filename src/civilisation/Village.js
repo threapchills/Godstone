@@ -1,6 +1,30 @@
-import { TILE_SIZE } from '../core/Constants.js'
+import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
 import { buildPalette, TILES } from '../world/TileTypes.js'
 import { WanderingWarrior } from './Warrior.js'
+
+// Vegetation tiles count as "not solid" for grounding so buildings
+// don't perch on top of trees and grass.
+const NON_SOLID = new Set([0, 16, 17, 18, 19, 20])
+
+// Walk down from a starting tile until we find a tile whose neighbour
+// below is solid. Returns the tile y where an entity with origin
+// (0.5, 1) should sit so its feet rest on the surface.
+//
+// The search is bounded by maxWalk tiles so a building or villager
+// doesn't tumble into a deep chasm next to its village; if no ground
+// is found within the window we return fallbackY instead. Buildings
+// near the village should stay near the village.
+function findGroundTileY(grid, tileX, startTileY, fallbackY, maxWalk = 18) {
+  const wrappedX = ((tileX % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
+  const limit = Math.min(WORLD_HEIGHT - 1, startTileY + maxWalk)
+  let y = Math.max(0, startTileY)
+  while (y < limit) {
+    const tile = grid[(y + 1) * WORLD_WIDTH + wrappedX]
+    if (!NON_SOLID.has(tile)) return y + 1
+    y++
+  }
+  return fallbackY
+}
 
 const POP_CAPS = [0, 10, 20, 35, 50, 70, 90, 120]
 const BASE_GROWTH_RATE = 0.3
@@ -221,13 +245,22 @@ export default class Village {
     const count = BUILDING_COUNTS[this.stage] || 1
     const spread = STAGE_SPREAD[this.stage] || 3
     const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2
-    const py = this.tileY * TILE_SIZE
+
+    const grid = this.scene.worldGrid?.grid
 
     for (let i = 0; i < count; i++) {
       const type = this._pickBuildingType(rng)
       const dx = i === 0 ? 0 : (rng() - 0.5) * 2 * spread * TILE_SIZE
+      const buildingX = cx + dx
+      // Snap each building to its own column's ground so they hug hills
+      // and valleys. Search starts a few tiles above the village anchor
+      // and is capped to a small window so a hut next to a chasm
+      // doesn't end up at the bottom of the world.
+      const py = grid
+        ? findGroundTileY(grid, Math.floor(buildingX / TILE_SIZE), Math.max(0, this.tileY - 6), this.tileY) * TILE_SIZE
+        : this.tileY * TILE_SIZE
       const key = this._ensureBuildingTexture(type)
-      const sprite = this.scene.add.sprite(cx + dx, py, key)
+      const sprite = this.scene.add.sprite(buildingX, py, key)
       sprite.setOrigin(0.5, 1)
       sprite.setScale(BUILDING_SCALE)
       sprite.setDepth(5)
@@ -236,6 +269,25 @@ export default class Village {
 
     // First building doubles as this.sprite for backward compat
     this.sprite = this.buildings[0] || null
+  }
+
+  // Continuous re-grounding: called from update each frame so buildings
+  // sit on the ground even after the god terraforms beneath them. Only
+  // the y is adjusted; x stays put. Falls back to the village anchor
+  // if no ground is found within the search window.
+  updateGrounding() {
+    const grid = this.scene.worldGrid?.grid
+    if (!grid) return
+
+    for (const bld of this.buildings) {
+      const tileX = Math.floor(bld.x / TILE_SIZE)
+      const startTileY = Math.max(0, Math.floor(bld.y / TILE_SIZE) - 2)
+      const groundTileY = findGroundTileY(grid, tileX, startTileY, this.tileY)
+      const targetY = groundTileY * TILE_SIZE
+      if (Math.abs(bld.y - targetY) > 0.5) {
+        bld.y = targetY
+      }
+    }
   }
 
   _pickBuildingType(rng) {
@@ -316,8 +368,13 @@ export default class Village {
   _spawnVillager() {
     const spread = Math.max(STAGE_SPREAD[this.stage], 3) * TILE_SIZE
     const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2
-    const py = this.tileY * TILE_SIZE
     const x = cx + (Math.random() - 0.5) * 2 * spread
+
+    // Snap each new villager to the ground beneath their spawn column
+    const grid = this.scene.worldGrid?.grid
+    const py = grid
+      ? findGroundTileY(grid, Math.floor(x / TILE_SIZE), Math.max(0, this.tileY - 6), this.tileY) * TILE_SIZE
+      : this.tileY * TILE_SIZE
 
     const w = new WanderingWarrior(this.scene, x, py, this.stage, this.clothingColour, cx, spread)
     this.villagerSprites.push(w)

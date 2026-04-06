@@ -9,11 +9,12 @@ import { COMBAT } from '../combat/Combat.js'
 // objects with a single behaviour method keeps the call sites legible.
 
 export class Spell {
-  constructor({ name, glyph, cooldown, colour }) {
+  constructor({ name, glyph, cooldown, colour, manaCost = 1 }) {
     this.name = name
     this.glyph = glyph
     this.cooldown = cooldown
     this.colour = colour
+    this.manaCost = manaCost
     this.cooldownRemaining = 0
   }
 

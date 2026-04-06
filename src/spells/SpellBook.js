@@ -45,13 +45,20 @@ export default class SpellBook {
   }
 
   // Try to cast the active spell at the given world coordinates.
-  // Returns true on success.
+  // Returns true on success. Casts cost mana from the god; an empty
+  // pool blocks the cast and surfaces a hint.
   cast(scene, targetX, targetY) {
     const spell = this.active()
     if (!spell) return false
     if (spell.cooldownRemaining > 0) return false
+    const god = scene.god
+    if (god && god.mana < spell.manaCost) {
+      if (scene.showMessage) scene.showMessage('Not enough mana. Keep moving to recharge.', 1200)
+      return false
+    }
     if (spell.cast(scene, targetX, targetY)) {
       spell.cooldownRemaining = spell.cooldown
+      if (god) god.mana = Math.max(0, god.mana - spell.manaCost)
       return true
     }
     return false

@@ -26,6 +26,20 @@ export default class SpellBar {
       strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(50)
 
+    // Mana bar above the slot row. Width matches the row of slots so
+    // it reads as part of the same widget.
+    const manaW = totalW
+    const manaY = baseY - 26
+    this.manaBack = scene.add.rectangle(GAME_WIDTH / 2, manaY, manaW, 4, 0x222244, 0.85)
+      .setScrollFactor(0).setDepth(50)
+    this.manaFill = scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2, manaY, manaW, 4, 0x4488dd, 1)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
+    // Tick marks splitting the bar into 3 segments (one per spell)
+    for (let i = 1; i < 3; i++) {
+      scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / 3), manaY, 1, 4, 0x000000, 0.6)
+        .setScrollFactor(0).setDepth(52)
+    }
+
     for (let i = 0; i < 3; i++) {
       const x = baseX + i * (SLOT_W + SLOT_GAP)
       const cx = x + SLOT_W / 2
@@ -106,9 +120,16 @@ export default class SpellBar {
     return key
   }
 
-  update(spellBook) {
+  update(spellBook, god) {
     const list = spellBook.unlockedSpells()
     const active = spellBook.active()
+
+    // Mana bar fill: god.mana is 0..maxMana, we render as a fraction
+    if (god && this.manaFill) {
+      const totalW = this.manaBack.width
+      const fraction = Math.max(0, Math.min(1, god.mana / god.maxMana))
+      this.manaFill.width = totalW * fraction
+    }
 
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i]

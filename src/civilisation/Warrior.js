@@ -1,4 +1,22 @@
-import { TILE_SIZE } from '../core/Constants.js'
+import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
+
+// Walk down from a starting tile until we find a tile whose neighbour
+// below is solid. Vegetation tiles count as non-solid so warriors
+// don't perch on top of trees. Bounded by maxWalk so a warrior next
+// to a chasm doesn't tumble to the bottom of the world; falls back to
+// fallbackTileY when no ground is found in the window.
+const NON_SOLID = new Set([0, 16, 17, 18, 19, 20])
+function findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 18) {
+  const wrappedX = ((tileX % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
+  const limit = Math.min(WORLD_HEIGHT - 1, startTileY + maxWalk)
+  let y = Math.max(0, startTileY)
+  while (y < limit) {
+    const tile = grid[(y + 1) * WORLD_WIDTH + wrappedX]
+    if (!NON_SOLID.has(tile)) return y + 1
+    y++
+  }
+  return fallbackTileY
+}
 
 // A villager / soldier figure rendered with stage-specific equipment.
 // The same procedural texture builder is used for both the wandering
@@ -185,26 +203,38 @@ export class WanderingWarrior {
   }
 
   update(delta) {
-    if (this.isPaused) {
+    if (!this.isPaused) {
+      this.sprite.x += this.direction * this.speed * delta / 1000
+      this.sprite.setFlipX(this.direction < 0)
+
+      if (Math.abs(this.sprite.x - this.anchorX) > this.spreadPx) {
+        this.direction *= -1
+        this.sprite.x = this.anchorX + Math.sign(this.sprite.x - this.anchorX) * this.spreadPx
+      }
+
+      if (Math.random() < 0.004) {
+        this.isPaused = true
+        this.pauseTimer = 600 + Math.random() * 2000
+      }
+    } else {
       this.pauseTimer -= delta
       if (this.pauseTimer <= 0) {
         this.isPaused = false
         if (Math.random() > 0.5) this.direction *= -1
       }
-      return
     }
 
-    this.sprite.x += this.direction * this.speed * delta / 1000
-    this.sprite.setFlipX(this.direction < 0)
-
-    if (Math.abs(this.sprite.x - this.anchorX) > this.spreadPx) {
-      this.direction *= -1
-      this.sprite.x = this.anchorX + Math.sign(this.sprite.x - this.anchorX) * this.spreadPx
-    }
-
-    if (Math.random() < 0.004) {
-      this.isPaused = true
-      this.pauseTimer = 600 + Math.random() * 2000
+    // Snap to local ground each frame so warriors hug the terrain when
+    // walking and fall to a new floor when the god terraforms beneath
+    // them. Bounded so a warrior next to a chasm doesn't fall through;
+    // fallback is the warrior's existing y so they hold position.
+    const grid = this.scene.worldGrid?.grid
+    if (grid) {
+      const tileX = Math.floor(this.sprite.x / TILE_SIZE)
+      const startTileY = Math.max(0, Math.floor(this.sprite.y / TILE_SIZE) - 3)
+      const fallbackTileY = Math.floor(this.sprite.y / TILE_SIZE)
+      const groundTileY = findGroundTileY(grid, tileX, startTileY, fallbackTileY)
+      this.sprite.y = groundTileY * TILE_SIZE
     }
   }
 
