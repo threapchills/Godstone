@@ -208,6 +208,12 @@ export default class WorldScene extends Phaser.Scene {
     this.ambience.init().then(() => {
       this.ambience.setWorld(params)
     })
+
+    // Sound event tracking for detecting god actions
+    this._prevDigTime = 0
+    this._prevFlapTime = 0
+    this._lastStepSound = 0
+    this._prevInLiquid = false
   }
 
   createHUD(params) {
@@ -408,6 +414,43 @@ export default class WorldScene extends Phaser.Scene {
     if (this.ambience?.initialized) {
       this.ambience.setTimeOfDay(this.dayTime)
       this.ambience.setDepth(tileY / WORLD_HEIGHT)
+
+      // Critter sounds: panned one-shots from nearby wildlife
+      if (this.critters) {
+        const camX = this.cameras.main.scrollX + GAME_WIDTH / 2
+        const camY = this.cameras.main.scrollY + GAME_HEIGHT / 2
+        this.ambience.updateCritters(this.critters.critters, camX, camY)
+      }
+
+      // Village proximity: ambient murmur near settlements
+      this.ambience.updateVillageProximity(this.villages, this.god.sprite.x, this.god.sprite.y)
+
+      // God movement: dig crunch
+      if (this.god.lastDigTime !== this._prevDigTime) {
+        this._prevDigTime = this.god.lastDigTime
+        this.ambience.playDig()
+      }
+      // God movement: wing flap
+      if (this.god.lastFlapTime !== this._prevFlapTime) {
+        this._prevFlapTime = this.god.lastFlapTime
+        this.ambience.playFlap()
+      }
+      // God movement: footsteps (throttled to 250ms)
+      if (this.god.sprite.body.blocked.down && Math.abs(this.god.sprite.body.velocity.x) > 15) {
+        if (time - this._lastStepSound > 250) {
+          this._lastStepSound = time
+          const stX = ((Math.floor(this.god.sprite.x / TILE_SIZE)) % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH
+          const stY = Math.floor(this.god.sprite.y / TILE_SIZE)
+          let tile = stY >= 0 && stY < WORLD_HEIGHT ? this.worldGrid.grid[stY * WORLD_WIDTH + stX] : 0
+          if (tile === 0 && stY + 1 < WORLD_HEIGHT) tile = this.worldGrid.grid[(stY + 1) * WORLD_WIDTH + stX]
+          this.ambience.playStep(tile)
+        }
+      }
+      // God movement: splash on entering water
+      if (this.god.isInLiquid !== this._prevInLiquid) {
+        if (this.god.isInLiquid) this.ambience.playSplash()
+        this._prevInLiquid = this.god.isInLiquid
+      }
     }
   }
 

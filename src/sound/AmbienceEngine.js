@@ -29,6 +29,14 @@ const CHANNEL_DEFS = {
 
 const ORDERED = ['air', 'fire', 'earth', 'water']
 
+// Maps critter type names (from Critters.js) to element keys for sound selection
+const CRITTER_ELEMENT = {
+  salamander: 'fire',
+  crab: 'water',
+  moth: 'air',
+  beetle: 'earth',
+}
+
 function mulberry32(seed) {
   return function () {
     seed |= 0; seed = (seed + 0x6d2b79f5) | 0
@@ -87,6 +95,9 @@ export default class AmbienceEngine {
 
     this._buildMasterChain()
     this._buildChannels()
+    this._noiseBuffer = this._createNoiseBuffer(1)
+    this._initCritterLayer()
+    this._initVillageLayer()
     await this._loadCoreSounds()
     this._loadRemainingSounds() // fire-and-forget
     this.initialized = true
@@ -339,12 +350,329 @@ export default class AmbienceEngine {
     this.masterGain.gain.setTargetAtTime(Math.pow(v, 2.2), this.ctx.currentTime, 0.15)
   }
 
+  // ============================================================
+  //  CRITTER SOUND LAYER
+  //  Stochastic element-themed one-shots panned to critter positions
+  // ============================================================
+
+  _createNoiseBuffer(duration) {
+    const length = Math.floor(this.ctx.sampleRate * duration)
+    const buffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1
+    return buffer
+  }
+
+  _initCritterLayer() {
+    this._lastCritterTime = 0
+    this._nextCritterDelay = 3
+  }
+
+  // Call from the game loop. Picks a random nearby critter and plays
+  // an element-themed sound at stochastic intervals (2-8s).
+  updateCritters(critters, cameraX, cameraY) {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const now = this.ctx.currentTime
+    if (now - this._lastCritterTime < this._nextCritterDelay) return
+
+    const range = 400
+    const nearby = critters.filter(c => {
+      if (!c.sprite?.active) return false
+      const dx = c.sprite.x - cameraX
+      const dy = c.sprite.y - cameraY
+      return dx * dx + dy * dy < range * range
+    })
+    if (nearby.length === 0) return
+
+    const critter = nearby[Math.floor(Math.random() * nearby.length)]
+    const dx = critter.sprite.x - cameraX
+    const dy = critter.sprite.y - cameraY
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const pan = Math.max(-1, Math.min(1, dx / 300))
+    const volume = Math.max(0, 1 - dist / range) * 0.15
+
+    const element = CRITTER_ELEMENT[critter.typeName] || 'earth'
+    this._playCritterOneShot(element, pan, volume)
+
+    this._lastCritterTime = now
+    this._nextCritterDelay = 2 + Math.random() * 6
+  }
+
+  _playCritterOneShot(element, pan, volume) {
+    const ac = this.ctx
+    const panner = ac.createStereoPanner()
+    panner.pan.value = pan
+    panner.connect(this.masterGain)
+
+    switch (element) {
+      case 'fire': this._fireCrackle(volume, panner); break
+      case 'water': this._waterDrip(volume, panner); break
+      case 'air': this._airWhistle(volume, panner); break
+      case 'earth': this._earthClick(volume, panner); break
+    }
+  }
+
+  // Rapid micro-bursts of bandpass-filtered noise
+  _fireCrackle(vol, dest) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const bursts = 2 + Math.floor(Math.random() * 2)
+    for (let i = 0; i < bursts; i++) {
+      const t = now + i * 0.04 + Math.random() * 0.02
+      const src = ac.createBufferSource()
+      src.buffer = this._noiseBuffer
+      const bp = ac.createBiquadFilter()
+      bp.type = 'bandpass'
+      bp.frequency.value = 800 + Math.random() * 2000
+      bp.Q.value = 2 + Math.random() * 3
+      const env = ac.createGain()
+      env.gain.setValueAtTime(0, t)
+      env.gain.linearRampToValueAtTime(vol * (0.5 + Math.random() * 0.5), t + 0.003)
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.03 + Math.random() * 0.04)
+      src.connect(bp).connect(env).connect(dest)
+      src.start(t)
+      src.stop(t + 0.1)
+    }
+  }
+
+  // Sine sweep downward; the plop of a water droplet
+  _waterDrip(vol, dest) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const osc = ac.createOscillator()
+    osc.type = 'sine'
+    const f0 = 600 + Math.random() * 600
+    osc.frequency.setValueAtTime(f0, now)
+    osc.frequency.exponentialRampToValueAtTime(f0 * 0.3, now + 0.12)
+    const env = ac.createGain()
+    env.gain.setValueAtTime(vol * 0.4, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.15)
+    osc.connect(env).connect(dest)
+    osc.start(now)
+    osc.stop(now + 0.2)
+  }
+
+  // High sine with vibrato; moth flutter / wind whistle
+  _airWhistle(vol, dest) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const osc = ac.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.value = 2000 + Math.random() * 1500
+    const vibrato = ac.createOscillator()
+    vibrato.frequency.value = 4 + Math.random() * 4
+    const vibGain = ac.createGain()
+    vibGain.gain.value = 25 + Math.random() * 20
+    vibrato.connect(vibGain).connect(osc.frequency)
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0, now)
+    env.gain.linearRampToValueAtTime(vol * 0.12, now + 0.08)
+    env.gain.setValueAtTime(vol * 0.12, now + 0.2)
+    env.gain.linearRampToValueAtTime(0, now + 0.4)
+    osc.connect(env).connect(dest)
+    osc.start(now)
+    vibrato.start(now)
+    osc.stop(now + 0.45)
+    vibrato.stop(now + 0.45)
+  }
+
+  // Sharp highpass noise impulse; beetle click / stone tap
+  _earthClick(vol, dest) {
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const hp = ac.createBiquadFilter()
+    hp.type = 'highpass'
+    hp.frequency.value = 1500 + Math.random() * 2500
+    hp.Q.value = 1
+    const env = ac.createGain()
+    env.gain.setValueAtTime(vol * 0.3, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.015 + Math.random() * 0.01)
+    src.connect(hp).connect(env).connect(dest)
+    src.start(now)
+    src.stop(now + 0.05)
+  }
+
+  // ============================================================
+  //  VILLAGE PROXIMITY LAYER
+  //  Ambient hum that fades in near settlements
+  // ============================================================
+
+  _initVillageLayer() {
+    const ac = this.ctx
+
+    // Filtered noise for indistinct murmur
+    const noiseSrc = ac.createBufferSource()
+    noiseSrc.buffer = this._noiseBuffer
+    noiseSrc.loop = true
+    const bp = ac.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = 280
+    bp.Q.value = 0.8
+
+    // Tonal hum (distant voices); grows louder at higher village stages
+    const hum = ac.createOscillator()
+    hum.type = 'triangle'
+    hum.frequency.value = 140
+    const humGain = ac.createGain()
+    humGain.gain.value = 0
+
+    // Campfire crackle for stage 2+
+    const fireSrc = ac.createBufferSource()
+    fireSrc.buffer = this._noiseBuffer
+    fireSrc.loop = true
+    const fireBP = ac.createBiquadFilter()
+    fireBP.type = 'bandpass'
+    fireBP.frequency.value = 1200
+    fireBP.Q.value = 1.5
+    const fireGain = ac.createGain()
+    fireGain.gain.value = 0
+
+    const villageGain = ac.createGain()
+    villageGain.gain.value = 0
+
+    noiseSrc.connect(bp).connect(villageGain)
+    hum.connect(humGain).connect(villageGain)
+    fireSrc.connect(fireBP).connect(fireGain).connect(villageGain)
+    villageGain.connect(this.masterGain)
+
+    noiseSrc.start()
+    hum.start()
+    fireSrc.start()
+
+    this._village = { noiseSrc, bp, hum, humGain, fireSrc, fireBP, fireGain, villageGain }
+  }
+
+  // Call from the game loop. Modulates village ambience based on
+  // god distance to the nearest village.
+  updateVillageProximity(villages, godX, godY) {
+    if (!this.initialized || !this._village) return
+    const now = this.ctx.currentTime
+    const range = 240 // ~30 tiles * 8px
+
+    let closestDist = Infinity
+    let closestVillage = null
+    for (const v of villages) {
+      const dx = v.worldX - godX
+      const dy = v.worldY - godY
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < closestDist) { closestDist = dist; closestVillage = v }
+    }
+
+    if (!closestVillage || closestDist > range) {
+      this._village.villageGain.gain.setTargetAtTime(0, now, 0.5)
+      this._village.humGain.gain.setTargetAtTime(0, now, 0.5)
+      this._village.fireGain.gain.setTargetAtTime(0, now, 0.5)
+      return
+    }
+
+    const proximity = 1 - closestDist / range
+    const stage = closestVillage.stage || 1
+
+    // Base murmur: squared falloff for natural attenuation
+    this._village.villageGain.gain.setTargetAtTime(proximity * proximity * 0.06, now, 0.3)
+    // Tonal hum: grows with village stage
+    this._village.humGain.gain.setTargetAtTime(proximity * (stage / 7) * 0.02, now, 0.5)
+    // Campfire: stage 2+
+    this._village.fireGain.gain.setTargetAtTime(stage >= 2 ? proximity * 0.03 : 0, now, 0.3)
+  }
+
+  // ============================================================
+  //  GOD MOVEMENT SOUNDS
+  //  One-shots triggered by player actions
+  // ============================================================
+
+  playDig() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const lp = ac.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.value = 300 + Math.random() * 200
+    lp.Q.value = 1
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.08, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+    src.connect(lp).connect(env).connect(this.masterGain)
+    src.start(now)
+    src.stop(now + 0.15)
+  }
+
+  // Filter frequency varies by surface material: stone is bright,
+  // soil is muffled, crystal rings, sand is soft.
+  playStep(tileType) {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const freqMap = { 1: 1800, 2: 600, 3: 2000, 7: 800, 8: 2000, 9: 700, 10: 2200, 11: 1500, 12: 2500 }
+    const freq = freqMap[tileType] || 1200
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const bp = ac.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = freq
+    bp.Q.value = 2
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.04, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.04)
+    src.connect(bp).connect(env).connect(this.masterGain)
+    src.start(now)
+    src.stop(now + 0.06)
+  }
+
+  playSplash() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const bp = ac.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = 400 + Math.random() * 300
+    bp.Q.value = 0.8
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.12, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
+    src.connect(bp).connect(env).connect(this.masterGain)
+    src.start(now)
+    src.stop(now + 0.35)
+  }
+
+  playFlap() {
+    if (!this.initialized || this.ctx.state !== 'running') return
+    const ac = this.ctx
+    const now = ac.currentTime
+    const src = ac.createBufferSource()
+    src.buffer = this._noiseBuffer
+    const bp = ac.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.setValueAtTime(200, now)
+    bp.frequency.exponentialRampToValueAtTime(900, now + 0.15)
+    bp.Q.value = 1.5
+    const env = ac.createGain()
+    env.gain.setValueAtTime(0.06, now)
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.2)
+    src.connect(bp).connect(env).connect(this.masterGain)
+    src.start(now)
+    src.stop(now + 0.25)
+  }
+
   destroy() {
     for (const ch of Object.values(this.channels)) {
       if (ch.abTimer) clearInterval(ch.abTimer)
       if (ch.pair) {
         try { ch.pair.srcA.stop(); ch.pair.srcB.stop() } catch { /* noop */ }
       }
+    }
+    if (this._village) {
+      try {
+        this._village.noiseSrc.stop()
+        this._village.hum.stop()
+        this._village.fireSrc.stop()
+      } catch { /* noop */ }
     }
     if (this.ctx) this.ctx.close()
     this.initialized = false

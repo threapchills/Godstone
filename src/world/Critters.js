@@ -89,6 +89,7 @@ export default class CritterManager {
       sprite,
       tileX,
       tileY,
+      typeName: type.name,
       direction: Math.random() > 0.5 ? 1 : -1,
       speed: 10 + Math.random() * 20,
       pauseTimer: 0,
