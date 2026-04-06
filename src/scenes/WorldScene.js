@@ -272,6 +272,21 @@ export default class WorldScene extends Phaser.Scene {
     this.targetTimeDilation = 1.0
   }
 
+  // Single entry point for camera juice. Severity presets keep call
+  // sites legible and stop trauma values drifting toward "everything
+  // shakes maximum at all times".
+  addJuice(severity) {
+    const presets = {
+      light:  { trauma: 0.22, slowmo: 0.65 },
+      medium: { trauma: 0.45, slowmo: 0.45 },
+      heavy:  { trauma: 0.7,  slowmo: 0.3 },
+      severe: { trauma: 1.0,  slowmo: 0.15 },
+    }
+    const p = presets[severity] || presets.light
+    this.addTrauma(p.trauma)
+    this.triggerSlowmo(p.slowmo)
+  }
+
   createHUD(params) {
     const pad = 12
 
@@ -375,8 +390,7 @@ export default class WorldScene extends Phaser.Scene {
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
 
-      this.addTrauma(0.8)
-      this.triggerSlowmo(0.1)
+      this.addJuice('light')
       if (this.ambience) this.ambience.playMagic()
     }
   }
@@ -663,6 +677,10 @@ export default class WorldScene extends Phaser.Scene {
     let soundCount = 0
     const maxSounds = 6
 
+    // Trauma accumulator: each lava-water reaction adds a tiny shake.
+    // Capped so a flood doesn't peg the camera at maximum trauma forever.
+    let reactionCount = 0
+
     for (const ev of events) {
       const wx = ev.x * TILE_SIZE + TILE_SIZE / 2
       const wy = ev.y * TILE_SIZE + TILE_SIZE / 2
@@ -679,6 +697,7 @@ export default class WorldScene extends Phaser.Scene {
             this.ambience.playHiss()
             soundCount++
           }
+          reactionCount++
           break
 
         case 'burn':
@@ -689,6 +708,7 @@ export default class WorldScene extends Phaser.Scene {
             this.ambience.playBurn()
             soundCount++
           }
+          reactionCount++
           break
 
         case 'erode':
@@ -701,6 +721,14 @@ export default class WorldScene extends Phaser.Scene {
           this.spawnGridParticle(wx, wy, 0xc2a64e, 4, -10, 300)
           break
       }
+    }
+
+    // One-shot juice burst for big elemental reactions. Threshold so
+    // a single bubble doesn't shake the camera; a real flood does.
+    if (reactionCount >= 6) {
+      this.addJuice('heavy')
+    } else if (reactionCount >= 2) {
+      this.addJuice('medium')
     }
   }
 
@@ -724,6 +752,9 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   respawnGod() {
+    // Severe juice on death; the player should feel the snap.
+    this.addJuice('severe')
+
     const home = this.villages[0]
     if (home) {
       this.god.sprite.x = home.worldX
