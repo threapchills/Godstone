@@ -1,5 +1,12 @@
 import { TILE_SIZE } from '../core/Constants.js'
 
+// Population caps per civilisation stage (index = stage number).
+// Open question: exact values TBD via playtesting.
+const POP_CAPS = [0, 10, 20, 35, 50, 70, 90, 120]
+const BASE_GROWTH_RATE = 0.3  // people/second at maximum conditions
+const GROWTH_THRESHOLD = 20   // belief must exceed this for population to grow
+const DECLINE_THRESHOLD = 10  // belief below this causes people to flee
+
 // A primitive village: cave dwellers at stage 1.
 // Phase 1: visual marker + belief tracking + tablet reception.
 export default class Village {
@@ -10,8 +17,10 @@ export default class Village {
     this.stage = 1
     this.belief = 50 // 0-100
     this.population = 5
+    this.fertility = params.barrenFertile ?? 0.5
     this.name = generateVillageName(params)
-    this.hasReceivedTablet = false
+    this.tabletsReceived = new Set() // tracks tablet stages already taught
+    this.isReceiving = false         // locks out re-triggers during staggered delivery
 
     // Pixel position (bottom of the structure sits on the surface)
     const px = tileX * TILE_SIZE + TILE_SIZE / 2
@@ -92,7 +101,7 @@ export default class Village {
   }
 
   createLabel(scene, px, py) {
-    this.label = scene.add.text(px, py - TILE_SIZE * 4, this.name, {
+    this.label = scene.add.text(px, py - TILE_SIZE * 4, `${this.name} · ${this.population}`, {
       fontFamily: 'Georgia, serif',
       fontSize: '10px',
       color: '#daa520',
@@ -120,20 +129,25 @@ export default class Village {
     this.beliefBar.fillRect(px - barWidth / 2, py, fillWidth, barHeight)
   }
 
-  // Called when the god delivers a tablet to this village
-  receiveTablet() {
-    if (this.hasReceivedTablet) return false
-    this.hasReceivedTablet = true
+  // Returns tablets from the god's inventory that this village hasn't learned yet
+  getNewTablets(godTablets) {
+    return godTablets.filter(t => !this.tabletsReceived.has(t.stage))
+  }
+
+  // Called once per tablet during staggered delivery
+  receiveTablet(tablet) {
+    if (this.tabletsReceived.has(tablet.stage)) return false
+    this.tabletsReceived.add(tablet.stage)
     this.stage = Math.min(this.stage + 1, 7)
     this.belief = Math.min(100, this.belief + 25)
     this.population += 3
     this.updateBeliefBar()
 
-    // Update label to show stage
+    // Flash the stage name; normal label refreshes in updatePopulation
     const stageNames = ['', 'Cave dwellers', 'Fire-makers', 'Farmers', 'Small village', 'Large village', 'Town', 'Civilisation']
-    this.label.setText(`${this.name} (${stageNames[this.stage]})`)
+    this.label.setText(`${this.name} — ${stageNames[this.stage]}`)
 
-    // Upgrade visual: make the sprite larger and add detail
+    // Upgrade visual
     this.upgradeVisual()
 
     // Flash effect
@@ -179,6 +193,32 @@ export default class Village {
         repeat: -1,
       })
     }
+  }
+
+  // Passive population growth or decline each tick.
+  // Growth requires belief > 20; scales with stage, fertility, and belief.
+  // Decline when belief collapses below 10 (people flee).
+  updatePopulation(delta) {
+    const cap = POP_CAPS[this.stage] || POP_CAPS[7]
+    const dt = delta / 1000
+    const prevPop = Math.floor(this.population)
+
+    if (this.belief < DECLINE_THRESHOLD) {
+      // Faith collapse: people flee, minimum 1 survivor
+      this.population = Math.max(1, this.population - 0.2 * dt)
+    } else if (this.belief > GROWTH_THRESHOLD && this.population < cap) {
+      const beliefFactor = (this.belief - GROWTH_THRESHOLD) / (100 - GROWTH_THRESHOLD)
+      const stageMul = 0.5 + this.stage * 0.2
+      const fertilityMul = 0.5 + this.fertility
+      this.population = Math.min(cap, this.population + BASE_GROWTH_RATE * beliefFactor * stageMul * fertilityMul * dt)
+    }
+
+    // Only touch the DOM when the displayed number actually changes
+    if (Math.floor(this.population) !== prevPop) this._refreshLabel()
+  }
+
+  _refreshLabel() {
+    this.label.setText(`${this.name} · ${Math.floor(this.population)}`)
   }
 
   // Passive belief generation when god is nearby

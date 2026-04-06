@@ -209,6 +209,9 @@ export default class WorldScene extends Phaser.Scene {
       this.ambience.setWorld(params)
     })
 
+    // Population HUD tracking
+    this._prevTotalPop = 0
+
     // Sound event tracking for detecting god actions
     this._prevDigTime = 0
     this._prevFlapTime = 0
@@ -385,12 +388,24 @@ export default class WorldScene extends Phaser.Scene {
     this.dayNightHUD.setText(isDay ? 'Day' : 'Night')
     this.dayNightHUD.setColor(isDay ? '#ddaa44' : '#6666aa')
 
-    // Update all village beliefs
+    // Update all village beliefs and populations
     for (const village of this.villages) {
       const dx = this.god.sprite.x - village.worldX
       const dy = this.god.sprite.y - village.worldY
       const dist = Math.sqrt(dx * dx + dy * dy)
       village.updateBelief(dist, delta)
+      village.updatePopulation(delta)
+    }
+
+    // Population HUD (only redraw when the number changes)
+    const totalPop = this.villages.reduce((sum, v) => sum + Math.floor(v.population), 0)
+    if (totalPop !== this._prevTotalPop) {
+      this._prevTotalPop = totalPop
+      const enlightened = this.villages.filter(v => v.tabletsReceived.size > 0).length
+      let hudText = `Villages: ${this.villages.length}`
+      if (enlightened > 0) hudText += ` (${enlightened} enlightened)`
+      hudText += ` · Pop: ${totalPop}`
+      this.villageHUD.setText(hudText)
     }
 
     // Critter AI
