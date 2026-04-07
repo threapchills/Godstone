@@ -432,6 +432,33 @@ export default class WorldScene extends Phaser.Scene {
 
       this.addJuice('light')
       if (this.ambience) this.ambience.playMagic()
+
+      // Sparkle burst at the pickup location: a small ring of additive
+      // motes drifting outward and fading. Pure feedback, no logic.
+      this._spawnPickupSparkle(tablet.worldX, tablet.worldY)
+    }
+  }
+
+  _spawnPickupSparkle(cx, cy) {
+    const colours = [0x9affe6, 0xc8fff0, 0xffffff]
+    for (let i = 0; i < 14; i++) {
+      const angle = (i / 14) * Math.PI * 2
+      const speed = 30 + Math.random() * 30
+      const c = colours[i % colours.length]
+      const m = this.add.circle(cx, cy, 1.6 + Math.random() * 1.2, c, 1)
+        .setDepth(22)
+      // Phaser BlendModes constant is 1 = ADD
+      m.setBlendMode(1)
+      this.tweens.add({
+        targets: m,
+        x: cx + Math.cos(angle) * speed,
+        y: cy + Math.sin(angle) * speed - 12,
+        alpha: 0,
+        scale: 0.2,
+        duration: 600 + Math.random() * 200,
+        ease: 'Quad.easeOut',
+        onComplete: () => m.destroy(),
+      })
     }
   }
 
@@ -947,6 +974,24 @@ export default class WorldScene extends Phaser.Scene {
   respawnGod() {
     // Severe juice on death; the player should feel the snap.
     this.addJuice('severe')
+
+    // Black flash overlay for a moment of death; fades back in over
+    // ~700ms once the god is back at the home village.
+    if (!this._deathFlash) {
+      this._deathFlash = this.add.rectangle(
+        GAME_WIDTH / 2, GAME_HEIGHT / 2,
+        GAME_WIDTH, GAME_HEIGHT,
+        0x000000, 0
+      ).setScrollFactor(0).setDepth(70)
+    }
+    this._deathFlash.setAlpha(0.85)
+    this.tweens.killTweensOf(this._deathFlash)
+    this.tweens.add({
+      targets: this._deathFlash,
+      alpha: 0,
+      duration: 700,
+      ease: 'Quad.easeOut',
+    })
 
     const home = this.villages[0]
     if (home) {

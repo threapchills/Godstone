@@ -106,6 +106,33 @@ export default class EnemyGod {
       this.sprite.setTint(0xff8888)
       this.scene.time.delayedCall(120, () => this.sprite && this.sprite.clearTint())
     }
+    // Hit particle burst: a few additive sparks at the impact site so
+    // the player gets visceral feedback when their bolt lands.
+    this._spawnHitBurst()
+  }
+
+  _spawnHitBurst() {
+    if (!this.scene || !this.sprite) return
+    const cx = this.sprite.x
+    const cy = this.sprite.y - this.sprite.height * 0.6
+    for (let i = 0; i < 7; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const speed = 30 + Math.random() * 50
+      const colour = i % 2 === 0 ? 0xffaa44 : 0xff5533
+      const p = this.scene.add.circle(cx, cy, 1.8 + Math.random(), colour, 1)
+        .setDepth(22)
+        .setBlendMode(Phaser.BlendModes.ADD)
+      this.scene.tweens.add({
+        targets: p,
+        x: cx + Math.cos(angle) * speed * 0.4,
+        y: cy + Math.sin(angle) * speed * 0.4,
+        alpha: 0,
+        scale: 0.2,
+        duration: 350 + Math.random() * 150,
+        ease: 'Quad.easeOut',
+        onComplete: () => p.destroy(),
+      })
+    }
   }
 
   _die() {

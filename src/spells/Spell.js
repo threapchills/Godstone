@@ -47,7 +47,10 @@ export class BoltSpell extends Spell {
     const uy = dy / dist
     const reach = Math.min(dist, TILE_SIZE * 18) // 18-tile range cap
 
-    // Visual: a bright additive line from source to landing point
+    // Visual: a bright additive line from source to landing point,
+    // plus a glowing sphere at the impact and a small trailing comet
+    // along the path so the spell reads as a thrown projectile rather
+    // than a static beam.
     const ex = sx + ux * reach
     const ey = sy + uy * reach
     const line = scene.add.line(0, 0, sx, sy, ex, ey, this.colour, 1)
@@ -61,6 +64,38 @@ export class BoltSpell extends Spell {
       duration: 280,
       onComplete: () => line.destroy(),
     })
+
+    // Impact glow
+    const head = scene.add.circle(ex, ey, 6, this.colour, 0.9)
+      .setDepth(21)
+      .setBlendMode(Phaser.BlendModes.ADD)
+    scene.tweens.add({
+      targets: head,
+      scale: 2.2,
+      alpha: 0,
+      duration: 320,
+      ease: 'Quad.easeOut',
+      onComplete: () => head.destroy(),
+    })
+
+    // Trail of small additive motes along the path; spawn 5 staggered
+    // dots so the comet has a brief tail before everything fades.
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 6
+      const tx = sx + ux * reach * t
+      const ty = sy + uy * reach * t
+      const mote = scene.add.circle(tx, ty, 2.5, 0xffffff, 1)
+        .setDepth(20)
+        .setBlendMode(Phaser.BlendModes.ADD)
+      scene.tweens.add({
+        targets: mote,
+        scale: 0.2,
+        alpha: 0,
+        duration: 220 + i * 30,
+        delay: i * 18,
+        onComplete: () => mote.destroy(),
+      })
+    }
 
     // Carve soft tiles along the path so digging bolts feel useful even
     // before enemies exist. Skip bedrock and liquids.

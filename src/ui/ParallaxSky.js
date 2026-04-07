@@ -81,6 +81,28 @@ export default class ParallaxSky {
     }
 
     this._windAccum = 0
+
+    // Star field: tiny additive dots seeded across the viewport.
+    // They're invisible by day and fade in at night via update().
+    // Anchored to the viewport (scrollFactor 0) so they stay put as
+    // the camera moves; the night feel comes from the twinkle, not
+    // from parallax.
+    this.stars = []
+    const STAR_COUNT = 60
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const x = (i * 137 + 13) % GAME_WIDTH
+      const y = (i * 83 + 7) % Math.floor(GAME_HEIGHT * 0.7) // upper sky band
+      const star = scene.add.circle(x, y, 0.7 + Math.random() * 0.8, 0xffffff, 1)
+        .setScrollFactor(0)
+        .setDepth(-6)
+        .setBlendMode(1) // ADD blend constant
+        .setAlpha(0)
+      this.stars.push({
+        sprite: star,
+        twinklePhase: Math.random() * Math.PI * 2,
+        twinkleRate: 0.8 + Math.random() * 1.6,
+      })
+    }
   }
 
   // Blend two hex colours linearly (t=0 → a, t=1 → b)
@@ -130,6 +152,17 @@ export default class ParallaxSky {
       tint = this._blend(tint, horizonAmber, horizonGlow * 0.25)
       layer.sprite.setTint(tint)
     }
+
+    // Star field: only visible at night (day = 0). Each star twinkles
+    // on its own phase for that "alive sky" feeling.
+    if (this.stars && this.stars.length) {
+      const nightAlpha = Math.max(0, 1 - day * 1.6) // fade in below noon
+      for (const s of this.stars) {
+        s.twinklePhase += dtSec * s.twinkleRate
+        const twinkle = 0.5 + 0.5 * Math.sin(s.twinklePhase)
+        s.sprite.alpha = nightAlpha * twinkle * 0.85
+      }
+    }
   }
 
   // Camera scroll has shifted by worldDeltaX (world wrap teleport).
@@ -143,5 +176,9 @@ export default class ParallaxSky {
     this.baseRect.destroy()
     this.layers.forEach(l => l.sprite.destroy())
     this.layers = []
+    if (this.stars) {
+      this.stars.forEach(s => s.sprite.destroy())
+      this.stars = []
+    }
   }
 }
