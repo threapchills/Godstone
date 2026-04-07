@@ -1,5 +1,6 @@
 import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE } from '../core/Constants.js'
 import { TILES } from './TileTypes.js'
+import { findGroundTileY } from '../utils/Grounding.js'
 
 // Manages large SkyBaby tree sprites overlaid on the tilemap where
 // the world generator placed TREE_TRUNK tiles. Handles wind sway,
@@ -76,6 +77,7 @@ export default class FoliageRenderer {
 
     this.trees.push({
       sprite,
+      tileX,
       baseIndex: tileY * WORLD_WIDTH + tileX,
       baseScale: scale,
       // Wind sway: phase offset so trees don't oscillate in lockstep
@@ -88,11 +90,12 @@ export default class FoliageRenderer {
     // Accumulate time for wind sway animation
     this.time += (delta || 16) / 1000
 
+    const grid = this.worldGrid.grid
     for (let i = this.trees.length - 1; i >= 0; i--) {
       const tree = this.trees[i]
 
       // Check if tree has been destroyed (lava, digging, etc.)
-      if (this.worldGrid.grid[tree.baseIndex] !== TILES.TREE_TRUNK) {
+      if (grid[tree.baseIndex] !== TILES.TREE_TRUNK) {
         tree.sprite.destroy()
         this.trees.splice(i, 1)
         continue
@@ -101,6 +104,13 @@ export default class FoliageRenderer {
       // Wind sway: gentle sinusoidal rotation around the base
       const sway = Math.sin(this.time * 1.2 + tree.swayPhase) * tree.swayAmplitude
       tree.sprite.rotation = sway
+
+      // Re-snap the trunk base to current ground so the tree drops
+      // when the dirt beneath it is dug out. Cheap, bounded search.
+      const startTileY = Math.max(0, Math.floor(tree.sprite.y / TILE_SIZE) - 2)
+      const fallbackTileY = Math.floor(tree.sprite.y / TILE_SIZE)
+      const groundTileY = findGroundTileY(grid, tree.tileX, startTileY, fallbackTileY)
+      tree.sprite.y = groundTileY * TILE_SIZE
     }
   }
 

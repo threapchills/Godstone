@@ -19,6 +19,11 @@ export const COMBAT = {
     jumpVelocity: -300,
     flyVelocity: -180,
     flyHorizSpeed: 110,
+    // Mana mirrors the player: a small pool that regenerates only
+    // while the rival is in motion. Each shadow bolt costs 1.
+    maxMana: 3,
+    boltManaCost: 1,
+    manaRegenPerSecond: 3 / 120, // full bar from empty over ~120s of motion
   },
   bodyguard: {
     maxHpByStage: { 3: 25, 4: 30, 5: 40, 6: 55, 7: 70 },

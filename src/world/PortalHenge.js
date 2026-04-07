@@ -1,4 +1,5 @@
 import { TILE_SIZE } from '../core/Constants.js'
+import { findGroundTileY } from '../utils/Grounding.js'
 
 // The portal henge: a Stonehenge-like structure, one per world.
 // The sole gateway to the omniverse. Phase 1 just renders it;
@@ -15,6 +16,24 @@ export default class PortalHenge {
     this.createSprite(scene, px, py, params)
     this.createLabel(scene, px, py)
     this.createGlow(scene, px, py, params)
+  }
+
+  // Re-snap the portal sprite to the current ground beneath it. The
+  // label and the glow ride on the sprite's y so they all move
+  // together. Bounded so a portal next to a chasm doesn't fall in.
+  updateGrounding() {
+    const grid = this.scene.worldGrid?.grid
+    if (!grid || !this.sprite) return
+    const tileX = Math.floor(this.sprite.x / TILE_SIZE)
+    const startTileY = Math.max(0, Math.floor(this.sprite.y / TILE_SIZE) - 2)
+    const groundTileY = findGroundTileY(grid, tileX, startTileY, this.tileY)
+    const targetY = groundTileY * TILE_SIZE
+    if (Math.abs(this.sprite.y - targetY) > 0.5) {
+      const dy = targetY - this.sprite.y
+      this.sprite.y = targetY
+      if (this.label) this.label.y += dy
+      if (this.glow) this.glow.y += dy
+    }
   }
 
   createSprite(scene, px, py, params) {

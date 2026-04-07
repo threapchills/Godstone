@@ -1,22 +1,5 @@
-import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
-
-// Walk down from a starting tile until we find a tile whose neighbour
-// below is solid. Vegetation tiles count as non-solid so warriors
-// don't perch on top of trees. Bounded by maxWalk so a warrior next
-// to a chasm doesn't tumble to the bottom of the world; falls back to
-// fallbackTileY when no ground is found in the window.
-const NON_SOLID = new Set([0, 16, 17, 18, 19, 20])
-function findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 18) {
-  const wrappedX = ((tileX % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
-  const limit = Math.min(WORLD_HEIGHT - 1, startTileY + maxWalk)
-  let y = Math.max(0, startTileY)
-  while (y < limit) {
-    const tile = grid[(y + 1) * WORLD_WIDTH + wrappedX]
-    if (!NON_SOLID.has(tile)) return y + 1
-    y++
-  }
-  return fallbackTileY
-}
+import { TILE_SIZE } from '../core/Constants.js'
+import { findGroundTileY } from '../utils/Grounding.js'
 
 // A villager / soldier figure rendered with stage-specific equipment.
 // The same procedural texture builder is used for both the wandering

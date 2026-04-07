@@ -6,7 +6,7 @@ Living document. Each session: move shipped work into "last session", drop new r
 
 - **Phase 1 (world, god, villages, tablets):** complete. Live at https://threapchills.github.io/Godstone/.
 - **Phase 2 (interactive particle simulation):** core falling-sand loop is in place. `world/GridSimulator.js` runs water / sand / lava on a moved-flag generation tracker with alternating scan; lava + water reactions emit hiss/steam events that the sound engine plays back. Still on the main thread; the planned Web Worker move is unfinished.
-- **Phase 3 (full single-player loop):** core systems shipped. Coherent village upgrade gate, tablet inventory + HUD, stage-equipped warriors, dispatched bodyguards, three-spell loadout with mouse controls, rival god with tiny AI tree, melee + bolt combat. Still missing: enemy warriors, populated battles, balance pass.
+- **Phase 3 (full single-player loop):** core systems shipped. Persistent level-agnostic tablets, sequenced multi-stage village upgrade, stage-equipped warriors, dispatched bodyguards, three-spell loadout with mouse + mana, rival god with tiny AI tree, melee + bolt combat, mana-gated casts with movement regen. Still missing: enemy warriors, populated battles, balance pass.
 - **Phase 4 (multiplayer, portal omniverse):** not started.
 - **Phase 5 (polish):** sound engine has eight spatial systems shipped; SkyBaby sample integration is still procedural-only.
 
@@ -56,44 +56,37 @@ All changes committed and pushed; live deploy is current. The session ran throug
 
 Build clean throughout (`npm run build`, ~1.61 MB minified, ~381 KB gzipped). Each item committed and pushed individually so `git log` is the timeline.
 
-## Backlog: next priorities
+## Backlog: Mike's current brief
 
-Combat exists but is shallow. Next session should put pressure on the new systems and balance them.
+Six items in priority order. Surgical, additive edits only; no breaking what is already built and carefully calibrated.
 
-### A. Enemy warriors + populated battles
+### 1. Project context refresh
+HANDOVER and memory updated to reflect the persistent-tablet world and Mike's new priorities. (Done as a preamble each session.)
 
-- **Why:** the rival god is currently a solo encounter. Bodyguards have a melee target but no peers. The world feels empty of conflict.
-- **Required behaviour:**
-  1. Rival villages spawn enemy warriors (use the existing `Warrior` module with a different clothing colour seed so they read as a different faction).
-  2. The rival god commands a small retinue that spawns near it on a slow timer (1 every ~8s up to a cap of 3).
-  3. Enemy warriors engage bodyguards in melee + use the existing combat values from `src/combat/Combat.js`.
-  4. Faction colour: pick a deliberately contrasting tint for the rival faction so they don't blend in with the player's villages.
-- **Files:** new `src/combat/EnemyWarrior.js` (or extend `Bodyguard.js` with a generic Combatant), updates to `Village.js` for hostile flag, `EnemyGod.js` for retinue spawn, `WorldScene.js` for collision/AI wiring.
+### 2. Enemy god mana constraints
+The rival god currently fires shadow bolts on a cooldown but has no mana pool. Add a mana pool that mirrors the player's so the rival also has to manage casts. Same regen rule: regen on movement. **Files:** `src/combat/Combat.js`, `src/combat/EnemyGod.js`.
 
-### B. Combat balance pass
+### 3. Universal grounding
+The Village.updateGrounding pattern needs to extend to everything that should sit on the ground after terraforming: portal henge, trees, bushes, mushrooms, grass, critters. Buildings, villagers, warriors, and bodyguards already snap. **Files:** `src/world/PortalHenge.js`, `src/world/FoliageRenderer.js`, `src/world/Critters.js`.
 
-- **Why:** combat values are first-pass. Bolt damage 18 vs 120 enemy HP means ~7 hits to kill (~3.5 seconds at 500ms cooldown) which is reasonable but untested. Bodyguard melee per stage is guesswork.
-- **Tasks:**
-  1. Playtest a full kill of the rival god with bodyguards engaged. Tune `COMBAT.spells.boltDamage`, `COMBAT.enemyGod.maxHp`, melee damage by stage.
-  2. Test what happens when god dies: respawn HP reset works, but visual feedback could be louder.
-  3. Decide whether enemy bolts should also have a per-target invuln window or if 500ms is too lenient.
-- **Files:** `src/combat/Combat.js` only, ideally.
+### 4. Wider tunnels + more labyrinthine caverns
+Cave tunnels are too narrow on average. The player should be able to traverse most of a world's underground without digging. Tune the labyrinth carving threshold and possibly add a second pass that widens existing corridors. **Files:** `src/world/WorldGenerator.js`.
 
-### C. Spell polish
+### 5. More flora and fauna per world and biome
+Trees, bushes, mushrooms, and critters need more variety with biome-aware selection. Same per-element seeded variant pattern critters already use, extended to plants and made biome-aware (forest grove, fungal cave, scorched flats, etc.). **Files:** `src/world/WorldGenerator.js` (vegetation), `src/world/Critters.js`, possibly a new `src/world/FloraVocab.js`.
 
-- **Right click as charged cast** (originally deferred). Decide flavour: held charge boosts bolt damage / radius, place spell drops a bigger cluster, geas boosts belief by more. Mike to sign off direction.
-- **Mana / cooldown HUD** is currently a sweep mask; should also show a numeric cooldown pip when partially down for spells with long cooldowns (geas at 4s).
-- **Spell visuals:** the bolt is a flat additive line. Could use a glowing sphere head + trailing particles. Place could telegraph a target reticle on hover.
+### 6. Freeform polish
+Open-ended additive improvements to gameplay, graphics, effects. Surgical additions, no refactors of working systems.
 
-### D. Tablet count vs village stage cap
+## Backlog: deferred from last session
 
-- Spec promises stages 2 to 7 (six tablets) but world only generates `TABLET_COUNT = 3` (stages 2 to 4). Decide whether to bump tablet count to 6 or keep it short for early playtests.
-- **Files:** `src/scenes/WorldScene.js` (TABLET_COUNT constant).
+These were Mike's prior priorities; now superseded by the six items above but worth keeping visible.
 
-### E. Bodyguard pathfinding upgrade
-
-- Current bodyguard AI is steering + brief flight when stuck. Works for open terrain but fails in tight caves. Brief consideration: add a tile-graph BFS toward the god updated every ~500 ms, fall back to flight for unreachable targets.
-- **Files:** new `src/utils/Pathfinding.js`, `src/civilisation/Bodyguard.js`.
+- **Enemy warriors + populated battles.** Rival villages spawn hostile warriors; the rival god gets a small retinue.
+- **Combat balance pass.** Playtest the kill loop, tune Combat.js values.
+- **Spell polish.** Right click charged cast (Mike to sign off direction), better spell visuals, numeric cooldown pip.
+- **Tablet count vs stage cap.** TABLET_COUNT is 3 but stages run to 7. Decide whether to bump.
+- **Bodyguard pathfinding upgrade.** Replace steering with a tile-graph BFS for tight caves.
 
 ## Backlog: older items still outstanding
 
@@ -110,11 +103,12 @@ Combat exists but is shallow. Next session should put pressure on the new system
 - **Combat tuning** lives in `src/combat/Combat.js`. Single source of truth: HP, damage, cooldowns, ranges, flee thresholds. Tweak there, not at call sites.
 - **Particle sim** lives in `src/world/GridSimulator.js`. Update is bottom-to-top with alternating x-direction per generation. The moved-flag `Uint8Array` is the ground truth for "did this cell already act this tick." Don't add new tile interactions without reading the existing `updateWater` / `updateSand` / `updateLava` for the conventions; in particular, the connected-body check is what stops the wobble bug from coming back.
 - **Minimap** is now a circular projection rebuilt from a pre-baked inverse lookup. The texture re-renders from the live grid every 250 ms via `Minimap.refreshTexture` so digs and lava flow show through. The forward projection helper `projectToScreen(tileX, tileY)` is shared with marker placement.
-- **Tablet inventory** is a count map (`god.tablets[stage] = count`) plus `god.totalEverCollected`. Use the latter for spell unlocks (only goes up). `god.consumeTablet(stage)` is the only way to spend.
+- **Tablet system** is persistent and level-agnostic. `god.highestTablet` is a single integer that only ever increments; `collectTablet()` advances it. Tablets are never consumed. A village at stage N needs the level N tablet, computed as `village.nextRequiredTablet === village.stage`. A single walk-in chains every upgrade the player's collection allows with a 1s stagger between rebuilds. Spell unlocks key off `god.highestTablet` (1 = bolt, 2 = +place, 3 = +geas).
 - **Spell system** lives in `src/spells/`. Spells are dumb objects with one `cast(scene, x, y)` method; the `SpellBook` owns the active selection and cooldowns. Adding a new spell is: define a class in `Spell.js`, register it in `SpellBook.allSpells`, append to `UNLOCK_ORDER`.
 - **Bodyguards** are dispatched via `WorldScene._updateBodyguards` on a 1s timer; only the closest qualifying village dispatches at a time, max three escorts. Each bodyguard owns its own physics body and follow AI; melee combat preempts formation seek when an enemy god is within 12 tiles.
 - **Sky** is anchored to the viewport (`scrollFactor 0`) with manual `tilePositionX/Y` driven by camera scroll. Do not put sky tileSprites in world space; the seam returns instantly.
-- **Surface snapping helper:** `WorldScene.snapToGround(grid, x, startY)` is the right pattern for any new entity that needs to sit on the ground. Use it for warriors, spawned NPCs, dropped items, everything.
+- **Surface snapping helper:** `WorldScene.snapToGround(grid, x, startY)` is the right pattern for any new entity that needs to sit on the ground. There is also a bounded `findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 18)` duplicated in `Village.js` and `Warrior.js` that caps the search and falls back gracefully; promote to a shared `utils/Grounding.js` if a third caller needs it.
+- **Mana** is a per-frame regen tied to actual god displacement. `god.maxMana = 3`, regen 3/120 per second when moving, drained 1 per spell cast. `SpellBook.cast` checks the pool before delegating to the spell and surfaces a hint when empty.
 - **Skipping the creation UI in dev:**
   ```js
   const game = window.__godstone

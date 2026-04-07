@@ -172,21 +172,54 @@ export function generateWorld(params) {
 
   // ── Pass 3b: Swiss cheese cavern carving (Labyrinth) ───────
   // Carve worm-like tunnels to create labyrinthine cave networks.
-  // We use the absolute value of noise to trace zero-crossings (worms).
+  // Two noise fields are unioned so the result is more labyrinthine
+  // (intersecting cave systems) than a single worm field. Thresholds
+  // are pushed wider so the player can navigate most caves without
+  // having to dig through walls.
   const labyrinthScale = 0.025
-  // sparseDense 0 (Sparse) = moderate tunnels; 1 (Dense) = extreme honeycomb.
-  const labyrinthThreshold = 0.06 + sparseDense * 0.14
-  
+  const labyrinthScaleB = 0.018
+  // sparseDense 0 (Sparse) = walkable cave network; 1 (Dense) = full
+  // honeycomb. Even the sparse end carves enough to be navigable.
+  const labyrinthThreshold = 0.12 + sparseDense * 0.18
+  const labyrinthThresholdB = 0.10 + sparseDense * 0.16
+
   for (let x = 0; x < WORLD_WIDTH; x++) {
     const startY = Math.floor(surfaceHeights[x]) + 8
     for (let y = startY; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 5; y++) {
       if (grid[idx(x, y)] === TILES.STONE) {
-        const n = Math.abs(noise2D_b(x * labyrinthScale + 5000, y * labyrinthScale + 5000))
-        if (n < labyrinthThreshold) {
+        const n1 = Math.abs(noise2D_b(x * labyrinthScale + 5000, y * labyrinthScale + 5000))
+        const n2 = Math.abs(noise2D_b(x * labyrinthScaleB + 9100, y * labyrinthScaleB + 9100))
+        if (n1 < labyrinthThreshold || n2 < labyrinthThresholdB) {
           grid[idx(x, y)] = TILES.AIR
         }
       }
     }
+  }
+
+  // ── Pass 3c: Cave dilation ────────────────────────────────
+  // Widen existing air pockets by one tile so tunnels are
+  // walkable rather than crawl-only. The two-buffer pattern
+  // (mark then apply) avoids cascading dilations within a pass.
+  const widenChance = 0.55 + sparseDense * 0.35
+  const dilateMarks = []
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    const surfaceMin = Math.floor(surfaceHeights[x]) + 4
+    for (let y = surfaceMin; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 4; y++) {
+      if (grid[idx(x, y)] !== TILES.STONE) continue
+      // Wraparound x for neighbour checks
+      const xl = ((x - 1) + WORLD_WIDTH) % WORLD_WIDTH
+      const xr = (x + 1) % WORLD_WIDTH
+      const left = grid[idx(xl, y)]
+      const right = grid[idx(xr, y)]
+      const up = grid[idx(x, y - 1)]
+      const down = grid[idx(x, y + 1)]
+      if (left === TILES.AIR || right === TILES.AIR || up === TILES.AIR || down === TILES.AIR) {
+        if (rng4() < widenChance) dilateMarks.push(x, y)
+      }
+    }
+  }
+  for (let i = 0; i < dilateMarks.length; i += 2) {
+    grid[idx(dilateMarks[i], dilateMarks[i + 1])] = TILES.AIR
   }
 
 

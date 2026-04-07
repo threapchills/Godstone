@@ -15,6 +15,7 @@ import SpellBook from '../spells/SpellBook.js'
 import PortalHenge from '../world/PortalHenge.js'
 import ParallaxSky from '../ui/ParallaxSky.js'
 import CritterManager from '../world/Critters.js'
+import BiomeFlora from '../world/BiomeFlora.js'
 import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
@@ -193,6 +194,13 @@ export default class WorldScene extends Phaser.Scene {
 
     // Ambient critters
     this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
+
+    // Biome-flavoured flora overlays (crystals, glow mushrooms, coral,
+    // ferns, cacti, etc.) chosen by biome at each tile.
+    this.biomeFlora = new BiomeFlora(
+      this, this.worldGrid, worldData.surfaceHeights,
+      worldData.biomeMap, worldData.biomeVocab, params
+    )
 
     // Cosmetic ambient particles (embers, leaves, mist, fireflies, etc.)
     this.particles = new ParticleEngine(this, params, this.worldGrid, worldData.surfaceHeights)
@@ -581,6 +589,12 @@ export default class WorldScene extends Phaser.Scene {
         nearestVillage = village
       }
     }
+
+    // Portal henge: re-snap to ground so it doesn't float after digs
+    if (this.portalHenge?.updateGrounding) this.portalHenge.updateGrounding()
+
+    // Biome flora: re-snap decoration sprites to current ground
+    if (this.biomeFlora?.update) this.biomeFlora.update()
 
     // Tablet inventory HUD: highlights the slot the closest village wants
     if (this.tabletInventory) {

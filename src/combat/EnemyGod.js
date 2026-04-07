@@ -16,12 +16,15 @@ export default class EnemyGod {
     this.scene = scene
     this.hp = COMBAT.enemyGod.maxHp
     this.maxHp = COMBAT.enemyGod.maxHp
+    this.maxMana = COMBAT.enemyGod.maxMana
+    this.mana = this.maxMana
     this.state = STATE.WANDER
     this._lastBoltTime = 0
     this._lastJumpTime = 0
     this._wanderTarget = x
     this._stuckTimer = 0
     this._lastX = x
+    this._lastY = y
     this._isFlying = false
     this.alive = true
 
@@ -75,13 +78,20 @@ export default class EnemyGod {
     if (!this.hpBar) return
     this.hpBar.clear()
     const pct = Math.max(0, this.hp / this.maxHp)
+    const manaPct = Math.max(0, this.mana / this.maxMana)
     const w = 24
     const x = this.sprite.x - w / 2
     const y = this.sprite.y - this.sprite.height - 6
+    // HP bar
     this.hpBar.fillStyle(0x222222, 0.85)
     this.hpBar.fillRect(x, y, w, 3)
     this.hpBar.fillStyle(pct > 0.5 ? 0xaa3333 : 0xff5544, 1)
     this.hpBar.fillRect(x, y, w * pct, 3)
+    // Mana bar tucked just above the HP bar
+    this.hpBar.fillStyle(0x222244, 0.85)
+    this.hpBar.fillRect(x, y - 4, w, 2)
+    this.hpBar.fillStyle(0x6688dd, 1)
+    this.hpBar.fillRect(x, y - 4, w * manaPct, 2)
   }
 
   takeDamage(amount) {
@@ -135,6 +145,16 @@ export default class EnemyGod {
     const worldPx = WORLD_WIDTH * TILE_SIZE
     if (this.sprite.x < 0) this.sprite.x += worldPx
     else if (this.sprite.x >= worldPx) this.sprite.x -= worldPx
+
+    // Mana regen mirrors the player's: only while moving. The rival
+    // wandering around between engagements naturally rebuilds its pool.
+    const dxMove = this.sprite.x - this._lastX
+    const dyMove = this.sprite.y - this._lastY
+    const moved = (dxMove * dxMove + dyMove * dyMove) > 0.25
+    if (moved && this.mana < this.maxMana) {
+      this.mana = Math.min(this.maxMana, this.mana + COMBAT.enemyGod.manaRegenPerSecond * (delta / 1000))
+    }
+    this._lastY = this.sprite.y
 
     // Stuck detection: if barely moved while trying to seek, lift off
     if (Math.abs(this.sprite.x - this._lastX) < 0.5) {
@@ -224,9 +244,15 @@ export default class EnemyGod {
     body.setVelocityX(dir * COMBAT.enemyGod.speed * 0.3)
     this.sprite.setFlipX(dir < 0)
 
+    // Bolts gated by both cooldown and mana. Out of mana means the
+    // rival has to back off or wait until movement refills the pool;
+    // wandering between engagements naturally tops it up.
     const now = this.scene.time.now
-    if (now - this._lastBoltTime > COMBAT.enemyGod.boltCooldown) {
+    const cooldownReady = now - this._lastBoltTime > COMBAT.enemyGod.boltCooldown
+    const manaReady = this.mana >= COMBAT.enemyGod.boltManaCost
+    if (cooldownReady && manaReady) {
       this._lastBoltTime = now
+      this.mana = Math.max(0, this.mana - COMBAT.enemyGod.boltManaCost)
       this._fireBolt(godSprite)
     }
   }

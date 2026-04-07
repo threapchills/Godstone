@@ -1,30 +1,7 @@
-import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
+import { TILE_SIZE } from '../core/Constants.js'
 import { buildPalette, TILES } from '../world/TileTypes.js'
 import { WanderingWarrior } from './Warrior.js'
-
-// Vegetation tiles count as "not solid" for grounding so buildings
-// don't perch on top of trees and grass.
-const NON_SOLID = new Set([0, 16, 17, 18, 19, 20])
-
-// Walk down from a starting tile until we find a tile whose neighbour
-// below is solid. Returns the tile y where an entity with origin
-// (0.5, 1) should sit so its feet rest on the surface.
-//
-// The search is bounded by maxWalk tiles so a building or villager
-// doesn't tumble into a deep chasm next to its village; if no ground
-// is found within the window we return fallbackY instead. Buildings
-// near the village should stay near the village.
-function findGroundTileY(grid, tileX, startTileY, fallbackY, maxWalk = 18) {
-  const wrappedX = ((tileX % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
-  const limit = Math.min(WORLD_HEIGHT - 1, startTileY + maxWalk)
-  let y = Math.max(0, startTileY)
-  while (y < limit) {
-    const tile = grid[(y + 1) * WORLD_WIDTH + wrappedX]
-    if (!NON_SOLID.has(tile)) return y + 1
-    y++
-  }
-  return fallbackY
-}
+import { findGroundTileY } from '../utils/Grounding.js'
 
 const POP_CAPS = [0, 10, 20, 35, 50, 70, 90, 120]
 const BASE_GROWTH_RATE = 0.3
