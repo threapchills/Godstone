@@ -16,7 +16,11 @@ const NON_SOLID = new Set([0, 16, 17, 18, 19, 20])
 // Centralised so Village, Warrior, FoliageRenderer, Critters and the
 // portal can all share the same grounding behaviour without any of
 // them subtly disagreeing about what counts as solid.
-export function findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 18) {
+//
+// maxWalk is generous enough to handle the taller 900-tile world:
+// terraformed buildings and critters on the deepest chamber floors
+// still find a surface within a reasonable vertical window.
+export function findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 32) {
   const wrappedX = ((tileX % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
   const limit = Math.min(WORLD_HEIGHT - 1, startTileY + maxWalk)
   let y = Math.max(0, startTileY)

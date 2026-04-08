@@ -1,6 +1,9 @@
-// World dimensions in tiles
-export const WORLD_WIDTH = 600
-export const WORLD_HEIGHT = 300
+// World dimensions in tiles.
+// 8x area bump (2.67x wide, 3x tall) vs the 600x300 launch size so the
+// world reads as a proper planet: ~72 s to walk the wrap, ~10 screens
+// of vertical drama, and room to bury tablets at the molten core.
+export const WORLD_WIDTH = 1600
+export const WORLD_HEIGHT = 900
 export const TILE_SIZE = 8
 
 // Viewport
@@ -50,6 +53,8 @@ export const TERRAIN = {
   // as having a core rather than going hollow. Top tier is bedrock (dark
   // stone); below that sits the molten core (magma rock with lava veins).
   // Every cave-carving pass is clamped to stay above CORE_DEPTH + BEDROCK_DEPTH.
-  BEDROCK_DEPTH: 8,
-  CORE_DEPTH: 12,
+  // Both tiers scale with the larger world so the core reads proportional
+  // to the planet, not a thin crust at the bottom of a giant cavern.
+  BEDROCK_DEPTH: 18,
+  CORE_DEPTH: 28,
 }

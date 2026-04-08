@@ -98,7 +98,8 @@ export class BoltSpell extends Spell {
     }
 
     // Carve soft tiles along the path so digging bolts feel useful even
-    // before enemies exist. Skip bedrock and liquids.
+    // before enemies exist. Skip bedrock, magma rock, and liquids — the
+    // same undiggable set the god honours when digging by hand.
     const grid = scene.worldGrid?.grid
     if (grid) {
       const steps = Math.floor(reach / 4)
@@ -110,7 +111,7 @@ export class BoltSpell extends Spell {
         if (tx < 0 || tx >= WORLD_WIDTH || ty < 0 || ty >= WORLD_HEIGHT) continue
         const idx = ty * WORLD_WIDTH + tx
         const tile = grid[idx]
-        if (tile === TILES.AIR || tile === TILES.BEDROCK) continue
+        if (tile === TILES.AIR || tile === TILES.BEDROCK || tile === TILES.MAGMA_ROCK) continue
         if (LIQUID_TILES.has(tile)) continue
         grid[idx] = TILES.AIR
         if (scene.worldLayer) {
@@ -186,8 +187,10 @@ export class PlaceSpell extends Spell {
     const ty = Math.floor(targetY / TILE_SIZE)
     if (tx < 0 || tx >= WORLD_WIDTH || ty < 0 || ty >= WORLD_HEIGHT) return false
 
-    // Refuse to place on bedrock so we never silently break the world floor
-    if (grid[ty * WORLD_WIDTH + tx] === TILES.BEDROCK) return false
+    // Refuse to place on bedrock or magma so we never silently break the
+    // world floor or let the player vent the molten core.
+    const anchorTile = grid[ty * WORLD_WIDTH + tx]
+    if (anchorTile === TILES.BEDROCK || anchorTile === TILES.MAGMA_ROCK) return false
 
     // Place a small 3x3 cluster centred on the cursor so the gesture
     // feels generous; the falling-sand sim handles spread.
@@ -199,7 +202,7 @@ export class PlaceSpell extends Spell {
         const y = ty + dy
         if (x < 0 || x >= WORLD_WIDTH || y < 0 || y >= WORLD_HEIGHT) continue
         const idx = y * WORLD_WIDTH + x
-        if (grid[idx] === TILES.BEDROCK) continue
+        if (grid[idx] === TILES.BEDROCK || grid[idx] === TILES.MAGMA_ROCK) continue
         // Air-only tiles (PlaceSpell air): clear instead of fill
         if (this.element === 'air') {
           if (grid[idx] !== TILES.AIR) {

@@ -269,7 +269,11 @@ export default class God {
 
     const idx = tileY * worldGrid.width + tileX
     const tile = worldGrid.grid[idx]
-    if (tile === TILES.BEDROCK || tile === TILES.AIR) return false
+    // Uncarvable: the world's structural floor and its molten core. Magma
+    // rock is part of the core tier; cracking into it would let the god
+    // tunnel out the bottom of the world, which breaks the geological
+    // feeling of a finite planet.
+    if (tile === TILES.BEDROCK || tile === TILES.MAGMA_ROCK || tile === TILES.AIR) return false
     if (LIQUID_TILES.has(tile)) return false
 
     worldGrid.grid[idx] = TILES.AIR

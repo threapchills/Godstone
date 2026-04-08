@@ -1,14 +1,43 @@
 # Godstone — handover
 
-Living document. Each session: move shipped work into "last session", drop new requirements into the backlog, keep priority order honest. Mike directs, AI builds, one step at a time. Read `GODSTONE-game-design-spec.md` before touching any system.
+Living document. Each session: move shipped work into "last session", drop new requirements into the backlog, keep priority order honest. Mike directs, AI builds. Read `GODSTONE-game-design-spec.md` before touching any system.
 
-## Where we are
+## Active mission (April 2026)
+
+Mike has authorised **autonomous batch mode** for a seven-phase expansion that takes Godstone from a contemplative world-shaper to a full-bodied god-game with epic village battles, omniverse portals, and a 10-stage progression split across home and raid worlds.
+
+The rule this session is different from the usual "one step at a time": Mike said "work independently and push on as much as you can." Commit and push to `origin main` after each major batch. Signal handover at compact time.
+
+### Seven-phase plan (Mike has agreed the order)
+
+1. **Foundations** — 8x world, undiggable bedrock and magma, tablet depth redistribution
+2. **Water cycle** — evaporation + clouds + rain so liquids don't pool at the bottom forever
+3. **Camera AAA feel** — trauma shake, look-ahead, dynamic zoom, time dilation on action beats (pattern from Sky Baby's Camera class)
+4. **Population sprawl** — 1000+ villagers per world, village spreading, caveman fallback for unsupported villages
+5. **Combat import from Sky Baby** — bodyguard/homebody/raider roles, autonomous AI, arrow projectiles, War Director for village battles
+6. **Spell system import from Sky Baby** — full catalogue (fireball, earthquake, tide of life, bolt), wired to Godstone's existing mana economy (small 3-mana pool that regens during movement)
+7. **Portal omniverse** — inbound/outbound choice, AI god invasion, outbound raid with army, god statues, 10 stages split 7 home + 3 raid, sub-4s plane-walking transition
+
+### Key design decisions (so future-me doesn't re-litigate)
+
+- **World size**: 8x area → 1600 wide × 900 tall tiles (was 600×300). Roughly 2.67x wide, 3x tall. Traversal ~72s to wrap, ~10 screens deep.
+- **Villager fidelity**: hybrid — all tracked as data, only on-screen ones rendered. Sky Baby handles 500 simulated units; Godstone will aim for 1000+ tracked with visible sample spawning per village.
+- **Return trip rules**: one round trip per outbound journey. Next portal interaction resets inbound/outbound choice with a fresh random seed. No way to return to the same exact raid world twice.
+- **Sky Baby source** is accessible at `SOAR/` inside this repo. Read its code directly rather than rebuilding from description. Key files: `SOAR/js/world.js` (Camera), `SOAR/js/entities.js` (Warrior roles, Projectile, Fireball, RainCloud), `SOAR/js/main.js` (game loop, War Director, spell casting, time dilation triggers).
+- **Tablets vs god statues**: tablets drop on home world (stages 1-7). God statues drop from destroyed/conquered villages on raid worlds (stages 8-10). Functionally identical to tablets in the village progression pipeline, but only earned through raids.
+- **Undiggable tiles**: bedrock (already), magma rock, core lava. Deepest tablets sit just above this uncarvable floor so the exploration has proper vertical drama.
+
+### Currently in flight
+
+Phase 1 (Foundations) — starting now.
+
+## Where we are (pre-mission state)
 
 - **Phase 1 (world, god, villages, tablets):** complete. Live at https://threapchills.github.io/Godstone/.
 - **Phase 2 (interactive particle simulation):** core falling-sand loop is in place. `world/GridSimulator.js` runs water / sand / lava on a moved-flag generation tracker with alternating scan; lava + water reactions emit hiss/steam events that the sound engine plays back. Still on the main thread; the planned Web Worker move is unfinished.
-- **Phase 3 (full single-player loop):** core systems shipped. Persistent level-agnostic tablets, sequenced multi-stage village upgrade, stage-equipped warriors, dispatched bodyguards, three-spell loadout with mouse + mana, rival god with tiny AI tree, melee + bolt combat, mana-gated casts with movement regen. Still missing: enemy warriors, populated battles, balance pass.
-- **Phase 4 (multiplayer, portal omniverse):** not started.
-- **Phase 5 (polish):** sound engine has eight spatial systems shipped; SkyBaby sample integration is still procedural-only.
+- **Phase 3 (full single-player loop):** core systems shipped. Persistent level-agnostic tablets, sequenced multi-stage village upgrade, stage-equipped warriors, dispatched bodyguards, three-spell loadout with mouse + mana, rival god with tiny AI tree, melee + bolt combat, mana-gated casts with movement regen. Enemy warriors and populated battles are now covered by the active mission above.
+- **Phase 4 (multiplayer, portal omniverse):** single-player portal mechanics are now in the active mission above (phase 7). True multiplayer still deferred.
+- **Phase 5 (polish):** sound engine has eight spatial systems shipped; Sky Baby sample integration is still procedural-only.
 
 ### File structure (current)
 
@@ -19,8 +48,8 @@ src/
   world/
     WorldGenerator.js   WorldRenderer.js   TileTypes.js
     GridSimulator.js    PortalHenge.js     Critters.js
-    FoliageRenderer.js  ParticleEngine.js
-    ParallaxForeground.js   (inert; deletion candidate)
+    FoliageRenderer.js  ParticleEngine.js  MossLayer.js
+    BiomeFlora.js       ParallaxForeground.js   (inert; deletion candidate)
   god/
     God.js              GodRenderer.js
   civilisation/
@@ -38,77 +67,44 @@ src/
   sound/
     AmbienceEngine.js
   utils/
+    Grounding.js
 public/sounds/          (28 OGG; sky/fire/earth/sea x7 each)
+SOAR/                   (Sky Baby reference source — read, don't modify)
 ```
 
-## Last session: what shipped
+## Last session: what shipped before the mission started
 
-All changes committed and pushed; live deploy is current. The session ran through eight backlog items in priority order.
+Eight backlog items committed and pushed in priority order; live deploy is current.
 
-- **Circular minimap with live grid updates.** `src/ui/Minimap.js` projects the world onto a disc instead of a flat rectangle (sky at the rim, bedrock-tinted core at the centre, world wraps around). Pre-baked inverse projection lookup makes each refresh a single ImageData write. Refreshes from the live grid every 250 ms so dug terrain, lava flow, and water erosion all show through. Markers projected via shared forward helper.
-- **Tablet glow effect.** `src/civilisation/Tablet.js` rebuilt with five additive aura layers per tablet: outer halo, inner halo, vertical godray shaft, five orbiting motes on a squashed orbit, hovering glyph pip. Proximity reactivity swells the inner halo and pip when the god is within ~2.5 tiles, with hysteresis preventing re-trigger. New `AmbienceEngine.playTabletShimmer` is a pure-synth pentatonic chord with octave shimmer + high noise sparkle.
-- **Coherent village upgrade gate.** `God.tablets` is now a count map keyed by stage with `totalEverCollected` tracked separately. `Village.nextRequiredTablet` exposes the single stage a village will accept; out-of-order tablets show a throttled rejection hint and stay in inventory. New `src/ui/TabletInventory.js` widget renders one slot per stage in this world, with a gold ring on the slot the nearest village wants next.
-- **Camera shake + time dilation juice pass.** New `addJuice(severity)` helper with light/medium/heavy/severe presets. Tablet pickup tones down to 'light'. `processGridEvents` accumulates lava-water reactions and fires medium on a small flood, heavy on a large one. `respawnGod` fires severe on death.
-- **Visible warrior upgrades + bodyguards.** New `src/civilisation/Warrior.js` defines per-stage procedural sprites (villager, clubber, spearman, archer, swordsman, mounted rider, arcanist) drawn from the village's element-tinted clothing colour. Village now spawns `WanderingWarrior` instances and wipes/respawns on stage advance so equipment refreshes. New `src/civilisation/Bodyguard.js` is a physics-driven escort that seeks a formation slot around the god, walks, jumps, and lifts off when stuck or when the god flies. `Village.canDispatchBodyguards()` requires stage 3+ and belief 60+. WorldScene runs a periodic dispatch loop, capping at three escorts and culling those whose origin loses the faith.
-- **Spell system + mouse controls.** New `src/spells/Spell.js` defines Bolt (line damage that carves soft terrain), Place (drops the god's primary element into the falling-sand sim), and Geas (belief surge on the nearest village). `SpellBook` gates the visible loadout by total tablets ever collected. `src/ui/SpellBar.js` shows three slots in the bottom-centre with gold ring on active and a cooldown sweep mask. Mouse wheel cycles, left click casts at the cursor's world position, 1/2/3 select directly.
-- **Rival god + combat values.** New `src/combat/Combat.js` is the single tunable table for HP, damage, cooldowns, and ranges. New `src/combat/EnemyGod.js` is a horned silhouette deity with HP bar and a tiny WANDER → SEEK → ENGAGE → FLEE state machine; lifts off when stuck or when the player is far above, fires shadow bolts on cooldown, retreats and regen-heals when low. `God.takeDamage` has 500 ms invuln and routes to `respawnGod` on death. Bolt spell hits the rival god via point-to-segment distance check. Bodyguards engage the rival in melee when within 12 tiles. WorldScene spawns one rival on the opposite hemisphere and shows a player HP gauge in the top-left HUD.
-- **Critter spawn regression non-bug.** Investigated and could not reproduce on a clean world load (37 critters spawned with `barrenFertile = 0.7`). Closed.
+- **Circular minimap with live grid updates.** `src/ui/Minimap.js` projects the world onto a disc. Pre-baked inverse projection lookup makes each refresh a single ImageData write. Refreshes from the live grid every 250 ms so dug terrain, lava flow, and water erosion all show through. Markers projected via shared forward helper.
+- **Tablet glow effect.** `src/civilisation/Tablet.js` rebuilt with five additive aura layers per tablet: outer halo, inner halo, vertical godray shaft, five orbiting motes on a squashed orbit, hovering glyph pip. Proximity reactivity swells the inner halo and pip when the god is within ~2.5 tiles.
+- **Coherent village upgrade gate.** `God.tablets` is a count map; `Village.nextRequiredTablet` gates acceptance. New `src/ui/TabletInventory.js` widget renders one slot per stage with a gold ring on the slot the nearest village wants next.
+- **Camera shake + time dilation juice pass.** `addJuice(severity)` helper with light/medium/heavy/severe presets. This is the scaffold the AAA camera upgrade in phase 3 builds on.
+- **Visible warrior upgrades + bodyguards.** `src/civilisation/Warrior.js` defines per-stage procedural sprites. `src/civilisation/Bodyguard.js` is a physics-driven escort, max three, dispatched from villages with belief ≥ 60.
+- **Spell system + mouse controls.** `src/spells/Spell.js` defines Bolt, Place, Geas. `SpellBook` gates by total tablets ever collected. Phase 6 extends this.
+- **Rival god + combat values.** `src/combat/Combat.js` is the single tunable table. `EnemyGod.js` is a WANDER → SEEK → ENGAGE → FLEE state machine. Phase 7 adds AI invasion orchestration around this.
+- **Enemy god mana pool + universal grounding + wider tunnels + more flora/fauna.** All shipped as subsequent commits. See `git log`.
 
-Build clean throughout (`npm run build`, ~1.61 MB minified, ~381 KB gzipped). Each item committed and pushed individually so `git log` is the timeline.
+## Backlog (deferred, may fold into mission phases)
 
-## Backlog: Mike's current brief
-
-Six items in priority order. Surgical, additive edits only; no breaking what is already built and carefully calibrated.
-
-### 1. Project context refresh
-HANDOVER and memory updated to reflect the persistent-tablet world and Mike's new priorities. (Done as a preamble each session.)
-
-### 2. Enemy god mana constraints
-The rival god currently fires shadow bolts on a cooldown but has no mana pool. Add a mana pool that mirrors the player's so the rival also has to manage casts. Same regen rule: regen on movement. **Files:** `src/combat/Combat.js`, `src/combat/EnemyGod.js`.
-
-### 3. Universal grounding
-The Village.updateGrounding pattern needs to extend to everything that should sit on the ground after terraforming: portal henge, trees, bushes, mushrooms, grass, critters. Buildings, villagers, warriors, and bodyguards already snap. **Files:** `src/world/PortalHenge.js`, `src/world/FoliageRenderer.js`, `src/world/Critters.js`.
-
-### 4. Wider tunnels + more labyrinthine caverns
-Cave tunnels are too narrow on average. The player should be able to traverse most of a world's underground without digging. Tune the labyrinth carving threshold and possibly add a second pass that widens existing corridors. **Files:** `src/world/WorldGenerator.js`.
-
-### 5. More flora and fauna per world and biome
-Trees, bushes, mushrooms, and critters need more variety with biome-aware selection. Same per-element seeded variant pattern critters already use, extended to plants and made biome-aware (forest grove, fungal cave, scorched flats, etc.). **Files:** `src/world/WorldGenerator.js` (vegetation), `src/world/Critters.js`, possibly a new `src/world/FloraVocab.js`.
-
-### 6. Freeform polish
-Open-ended additive improvements to gameplay, graphics, effects. Surgical additions, no refactors of working systems.
-
-## Backlog: deferred from last session
-
-These were Mike's prior priorities; now superseded by the six items above but worth keeping visible.
-
-- **Enemy warriors + populated battles.** Rival villages spawn hostile warriors; the rival god gets a small retinue.
-- **Combat balance pass.** Playtest the kill loop, tune Combat.js values.
-- **Spell polish.** Right click charged cast (Mike to sign off direction), better spell visuals, numeric cooldown pip.
-- **Tablet count vs stage cap.** TABLET_COUNT is 3 but stages run to 7. Decide whether to bump.
-- **Bodyguard pathfinding upgrade.** Replace steering with a tile-graph BFS for tight caves.
-
-## Backlog: older items still outstanding
-
-- **Web Worker for the falling-sand sim.** Currently runs on the main thread inside `GridSimulator.update`. Phase 2 was supposed to push it into a worker so the Phaser render loop never starves. Becomes visible at higher particle counts.
-- **SkyBaby sample integration.** Procedural sound bus works; what's missing is layering real samples (gong / magic / ambient bird) over the procedural foundation with element-driven filter envelopes. Reference architecture is Slumbr.
+- **Web Worker for the falling-sand sim.** Currently runs on the main thread. Phase 2 was supposed to push it into a worker. Becomes visible at higher particle counts.
+- **Sky Baby sample integration for sound.** Procedural sound bus works; what's missing is layering real samples over the procedural foundation with element-driven filter envelopes.
 - **Delete `src/world/ParallaxForeground.js`** or repurpose as a back-of-camera foliage band; right now it's unused dead code.
-- **Population dynamics balance pass.** Belief growth and decline curves are placeholder; they need playtesting alongside the new combat loop.
-- **Open spec questions in section 11 of `GODSTONE-game-design-spec.md`.** Spell flavour, belief curves, combat values: don't decide silently, flag and ask.
-- **Biome bands within a world.** Horizontal partition into 3-5 biomes with their own tile tinting, vegetation density, cave frequency, particle emphasis. Was queued behind Phase 2.
+- **Population dynamics balance pass.** Belief growth and decline curves are placeholder.
+- **Biome bands within a world.** Horizontal partition into 3-5 biomes with their own tile tinting, vegetation density, cave frequency, particle emphasis.
 
-## Architectural notes for the next session
+## Architectural notes
 
-- **Module communication** runs through `core/EventBus.js` or shared scene state. Direct cross-module imports are a smell. Combat is the main exception: `EnemyGod.takeDamage` is called directly from `Spell.cast` and `Bodyguard.update`. That's fine for v1; if it grows, route through an event bus.
+- **Module communication** runs through `core/EventBus.js` or shared scene state. Direct cross-module imports are a smell. Combat is the main exception: `EnemyGod.takeDamage` is called directly from `Spell.cast` and `Bodyguard.update`. Fine for v1.
 - **Combat tuning** lives in `src/combat/Combat.js`. Single source of truth: HP, damage, cooldowns, ranges, flee thresholds. Tweak there, not at call sites.
-- **Particle sim** lives in `src/world/GridSimulator.js`. Update is bottom-to-top with alternating x-direction per generation. The moved-flag `Uint8Array` is the ground truth for "did this cell already act this tick." Don't add new tile interactions without reading the existing `updateWater` / `updateSand` / `updateLava` for the conventions; in particular, the connected-body check is what stops the wobble bug from coming back.
-- **Minimap** is now a circular projection rebuilt from a pre-baked inverse lookup. The texture re-renders from the live grid every 250 ms via `Minimap.refreshTexture` so digs and lava flow show through. The forward projection helper `projectToScreen(tileX, tileY)` is shared with marker placement.
-- **Tablet system** is persistent and level-agnostic. `god.highestTablet` is a single integer that only ever increments; `collectTablet()` advances it. Tablets are never consumed. A village at stage N needs the level N tablet, computed as `village.nextRequiredTablet === village.stage`. A single walk-in chains every upgrade the player's collection allows with a 1s stagger between rebuilds. Spell unlocks key off `god.highestTablet` (1 = bolt, 2 = +place, 3 = +geas).
-- **Spell system** lives in `src/spells/`. Spells are dumb objects with one `cast(scene, x, y)` method; the `SpellBook` owns the active selection and cooldowns. Adding a new spell is: define a class in `Spell.js`, register it in `SpellBook.allSpells`, append to `UNLOCK_ORDER`.
-- **Bodyguards** are dispatched via `WorldScene._updateBodyguards` on a 1s timer; only the closest qualifying village dispatches at a time, max three escorts. Each bodyguard owns its own physics body and follow AI; melee combat preempts formation seek when an enemy god is within 12 tiles.
-- **Sky** is anchored to the viewport (`scrollFactor 0`) with manual `tilePositionX/Y` driven by camera scroll. Do not put sky tileSprites in world space; the seam returns instantly.
-- **Surface snapping helper:** `WorldScene.snapToGround(grid, x, startY)` is the right pattern for any new entity that needs to sit on the ground. There is also a bounded `findGroundTileY(grid, tileX, startTileY, fallbackTileY, maxWalk = 18)` duplicated in `Village.js` and `Warrior.js` that caps the search and falls back gracefully; promote to a shared `utils/Grounding.js` if a third caller needs it.
-- **Mana** is a per-frame regen tied to actual god displacement. `god.maxMana = 3`, regen 3/120 per second when moving, drained 1 per spell cast. `SpellBook.cast` checks the pool before delegating to the spell and surfaces a hint when empty.
+- **Particle sim** lives in `src/world/GridSimulator.js`. Update is bottom-to-top with alternating x-direction per generation. The moved-flag `Uint8Array` is the ground truth. Don't add new tile interactions without reading the existing `updateWater` / `updateSand` / `updateLava`; the connected-body check is what stops the wobble bug from coming back.
+- **Minimap** is a circular projection rebuilt from a pre-baked inverse lookup. Re-renders from the live grid every 250 ms. At 8x world size, may need throttling or coarser resolution.
+- **Tablet system** is persistent and level-agnostic. `god.highestTablet` is a single integer that only ever increments. A village at stage N needs the level N tablet. A single walk-in chains every upgrade the player's collection allows.
+- **Spell system** lives in `src/spells/`. Spells are dumb objects with one `cast(scene, x, y)` method; the `SpellBook` owns the active selection and cooldowns. Adding a new spell: define a class in `Spell.js`, register it in `SpellBook.allSpells`, append to `UNLOCK_ORDER`.
+- **Bodyguards** dispatched via `WorldScene._updateBodyguards` on a 1s timer; max three escorts. Phase 5 introduces the broader warrior AI roles that will likely sit alongside Bodyguard rather than replacing it.
+- **Sky** is anchored to the viewport (`scrollFactor 0`) with manual `tilePositionX/Y` driven by camera scroll. Do not put sky tileSprites in world space.
+- **Grounding** is centralised in `src/utils/Grounding.js` (`findGroundTileY`). At 8x world size, bump `maxWalk` if needed.
+- **Mana** is a per-frame regen tied to actual god displacement. `god.maxMana = 3`, regen 3/120 per second when moving, drained 1 per spell cast. Sky Baby spells need their costs scaled down from Sky Baby's 40-80 per cast to Godstone's 1-3 economy.
 - **Skipping the creation UI in dev:**
   ```js
   const game = window.__godstone
@@ -123,20 +119,21 @@ These were Mike's prior priorities; now superseded by the six items above but wo
 
 ## Testing protocol
 
-For every backlog item:
+For every phase:
 
 1. `npm run build` must stay clean.
 2. Reload the preview at `localhost:3000`. Drive the game through `window.__godstone` if you need to skip menus.
 3. Capture a screenshot via the preview tools and check the visible result against the acceptance criteria.
 4. Only mark complete when the screenshot proves it.
+5. Commit with a clear message ending in the Co-Authored-By line, then push to `origin main`.
 
 ## Working principles (non-negotiable)
 
-- **Mike directs, AI builds.** Propose one step, wait for confirmation, then build. No bundling.
-- **Sound design is sacred.** Emergent randomisation within parameters. Static loops are unacceptable. See `feedback_sound_design.md`.
+- **Sound design is sacred.** Emergent randomisation within parameters. Static loops are unacceptable.
 - **Digging in all directions** is critical QoL. Any world gen change must preserve escape routes.
-- **Read `GODSTONE-game-design-spec.md`** before working on any new system. It's the authoritative GDD.
-- **Read `CLAUDE.md`** for architecture overview and conventions.
+- **Tablets are persistent** and never consumed.
+- **Read `GODSTONE-game-design-spec.md`** before working on any new system.
 - **Check memory files** in `.claude/projects/.../memory/` for accumulated feedback.
-- **Push to GitHub** periodically for backup. The deploy workflow handles GitHub Pages automatically.
-- The `slumbr/` directory is gitignored reference material (Mike's ambient sound engine). Don't delete it.
+- **Push to GitHub** after each major batch so work is backed up.
+- `slumbr/` is gitignored reference material (Mike's ambient sound engine). Don't delete it.
+- `SOAR/` is Sky Baby reference source — read it as often as needed, do not modify it.

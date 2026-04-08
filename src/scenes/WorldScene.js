@@ -23,10 +23,15 @@ import FoliageRenderer from '../world/FoliageRenderer.js'
 import MossLayer from '../world/MossLayer.js'
 // ParallaxForeground removed: produced ghostly floating silhouettes
 
-const VILLAGE_COUNT = 4
-const TABLET_COUNT = 3
-const VILLAGE_SPACING = 80 // minimum tile distance between villages
-const DAY_DURATION = 120000 // 2 minutes per full day/night cycle
+// Village and tablet counts scale with the world's footprint so the
+// 8x-area planet has enough settlements to feel inhabited and enough
+// tablets to reach stage 7 on the home world without raiding. Raid
+// worlds override this behaviour separately (no tablets, god statues
+// from conquered villages instead).
+const VILLAGE_COUNT = 16      // was 4 at 600x300; proportional to width
+const TABLET_COUNT = 7        // one per home stage (1-7); raids yield 8-10
+const VILLAGE_SPACING = 90    // minimum tile distance between villages
+const DAY_DURATION = 120000   // 2 minutes per full day/night cycle
 
 export default class WorldScene extends Phaser.Scene {
   constructor() {
@@ -52,10 +57,14 @@ export default class WorldScene extends Phaser.Scene {
       color: '#c07a28',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(100)
 
-    // Defer world gen to next frame so the loading text renders
-    this.time.delayedCall(50, () => {
+    // Defer world gen to next animation frame so the loading text paints
+    // first. requestAnimationFrame is more reliable than scene.time here
+    // because the scene's clock can lag during startup under HMR, leaving
+    // the gen queue pending indefinitely. At 8x world size gen takes ~3s
+    // so a visible loading frame matters.
+    requestAnimationFrame(() => {
       this.buildWorld(params)
-      loadText.destroy()
+      if (loadText && loadText.destroy) loadText.destroy()
     })
   }
 
@@ -121,11 +130,17 @@ export default class WorldScene extends Phaser.Scene {
       excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
     }
 
-    // Place multiple tablets underground. They're generic at world gen;
-    // each pickup is the next tablet level in the player's collection.
+    // Place multiple tablets underground. Each pickup is the next
+    // tablet level in the player's collection. Tablets spread across
+    // depth bands: the first sits near the surface and the last hides
+    // just above the molten core so reaching stage 7 rewards deep
+    // exploration and the player earns a proper geological tour.
     this.tablets = []
     for (let i = 0; i < TABLET_COUNT; i++) {
-      const pos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng)
+      // Depth band: 0..1 where 0 is just below surface and 1 is core-guard.
+      // Tablet 1 lands at ~20% depth; tablet 7 lands at ~95% depth.
+      const depthFrac = 0.2 + (i / Math.max(1, TABLET_COUNT - 1)) * 0.75
+      const pos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng, depthFrac)
       const tablet = new Tablet(this, pos.x, pos.y)
       this.tablets.push(tablet)
 

@@ -144,7 +144,12 @@ export function generateWorld(params) {
   // at least a few tiles above it for visual buffer.
   const coreGuard = coreTop - 4
 
-  const chamberCount = 3 + Math.floor(rng4() * 5)
+  // Feature counts scale with world area so an 8x planet gets 8x the
+  // chambers and shafts instead of feeling empty. The baseline constants
+  // (3-8 chambers, 6-12 shafts) are for the 180,000-tile launch size.
+  const AREA_SCALE = (WORLD_WIDTH * WORLD_HEIGHT) / (600 * 300)
+
+  const chamberCount = Math.floor((3 + rng4() * 5) * AREA_SCALE)
   for (let i = 0; i < chamberCount; i++) {
     const cx = Math.floor(rng4() * WORLD_WIDTH)
     const cy = Math.floor(surfaceBaseline + 30 + rng4() * (WORLD_HEIGHT * 0.4))
@@ -168,7 +173,7 @@ export function generateWorld(params) {
   // ── Pass 3: vertical shafts connecting layers ─────────────
   // Natural chimneys so the god can navigate between altitudes
 
-  const shaftCount = 6 + Math.floor(rng4() * 6)
+  const shaftCount = Math.floor((6 + rng4() * 6) * AREA_SCALE)
   for (let i = 0; i < shaftCount; i++) {
     const sx = Math.floor(rng4() * WORLD_WIDTH)
     const topY = Math.floor(surfaceHeights[sx])
@@ -443,7 +448,10 @@ function fillCavePools(grid, surfaceHeights, waterWeight) {
 
 function addFloatingIslands(grid, noise2D, surfaceHeights, airWeight, rng) {
   const idx = (x, y) => y * WORLD_WIDTH + x
-  const islandCount = Math.floor(3 + airWeight * 8)
+  // Scale with world width so the sky doesn't look empty on big planets.
+  // 600-wide launch size gave 3-11 islands; bigger worlds get more.
+  const widthScale = WORLD_WIDTH / 600
+  const islandCount = Math.floor((3 + airWeight * 8) * widthScale)
 
   for (let i = 0; i < islandCount; i++) {
     const cx = Math.floor(rng() * WORLD_WIDTH)
@@ -639,17 +647,47 @@ export function findFlatSurface(surfaceHeights, minWidth, rng, excludeZones = []
   return bestX
 }
 
-// Find a suitable underground location for a tablet.
-export function findTabletLocation(grid, surfaceHeights, rng) {
+// Find a suitable underground location for a tablet at a specific depth
+// band. depthFrac is 0..1: 0 means just below the surface, 1 means just
+// above the molten core. Higher-level tablets want to live deep so
+// exploration has real vertical drama and the final home tablets force
+// the player into the strata near bedrock. Bands overlap slightly so
+// a crowded noise pocket near one depth still yields a placement.
+export function findTabletLocation(grid, surfaceHeights, rng, depthFrac = 0.5) {
   const idx = (x, y) => y * WORLD_WIDTH + x
+  const coreTop = WORLD_HEIGHT - (TERRAIN.BEDROCK_DEPTH + TERRAIN.CORE_DEPTH) - 4
 
+  // Per-column minimum depth so a tablet can't land in the topsoil even
+  // at shallow bands.
+  const minDepthOffset = 24
+
+  // Clamp depthFrac to a sensible range so the band doesn't bleed into
+  // the core guard at the very bottom.
+  const clamped = Math.max(0, Math.min(1, depthFrac))
+  // Target band: ±6% of the total vertical range, centred on the fraction.
+  const bandHalfWidth = 0.06
+
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const x = Math.floor(rng() * WORLD_WIDTH)
+    const surfaceY = Math.floor(surfaceHeights[x])
+    const bandMin = Math.max(surfaceY + minDepthOffset, Math.floor(surfaceY + (coreTop - surfaceY) * (clamped - bandHalfWidth)))
+    const bandMax = Math.min(coreTop - 2, Math.floor(surfaceY + (coreTop - surfaceY) * (clamped + bandHalfWidth)))
+    if (bandMin >= bandMax) continue
+
+    const y = Math.floor(bandMin + rng() * (bandMax - bandMin))
+    if (grid[idx(x, y)] === TILES.AIR && y + 1 < WORLD_HEIGHT && grid[idx(x, y + 1)] !== TILES.AIR) {
+      return { x, y }
+    }
+  }
+
+  // Fallback: a wider search if the band was too tight. Same vertical
+  // window as before the depth bands existed, just clamped above the core.
   for (let attempt = 0; attempt < 200; attempt++) {
     const x = Math.floor(rng() * WORLD_WIDTH)
     const surfaceY = Math.floor(surfaceHeights[x])
-    const minY = surfaceY + 30
-    const maxY = WORLD_HEIGHT - 20
+    const minY = surfaceY + minDepthOffset
+    const maxY = coreTop - 2
     if (minY >= maxY) continue
-
     const y = Math.floor(minY + rng() * (maxY - minY))
     if (grid[idx(x, y)] === TILES.AIR && y + 1 < WORLD_HEIGHT && grid[idx(x, y + 1)] !== TILES.AIR) {
       return { x, y }
