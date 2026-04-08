@@ -6,22 +6,34 @@ import { TILES, buildPalette } from '../world/TileTypes.js'
 // (since the world wraps horizontally), world y maps from the outer
 // edge (sky) inward to a small bedrock core. Live-refreshes from the
 // grid so digging, lava flow, and water erosion all show through.
+//
+// The disc is player-centric: the god's column is always at the top
+// (north). As the god walks sideways the disc rotates beneath the
+// permanently-north-pointing god dot. As the god descends the dot
+// slides inward toward the core.
 
 const MAP_DIAMETER = 168
 const MARGIN = 12
-const REFRESH_INTERVAL = 250 // ms between texture refreshes
+const REFRESH_INTERVAL = 150 // ms between texture refreshes
 // Inset the disc inside its canvas so the rim has anti-aliased breathing room.
 const OUTER_R = MAP_DIAMETER / 2 - 4
 const INNER_R = OUTER_R * 0.16 // small molten core
+const TWO_PI = Math.PI * 2
 
 export default class Minimap {
   constructor(scene, worldGrid, params) {
     this.scene = scene
     this.worldGrid = worldGrid
 
-    const palette = buildPalette(params.element1, params.element2, params.elementRatio)
+    const palette = buildPalette(params)
     this.palette = palette
     this.paletteRGB = this.precomputePaletteRGB(palette)
+
+    // Per-column surface heights from world gen; used at refresh time to
+    // distinguish above-surface air (sky) from below-surface air (void).
+    // Player-dug tunnels land in the void category and get a distinct
+    // bright tint so they stand out against the surrounding stone.
+    this.surfaceHeights = worldGrid.surfaceHeights || null
 
     // Position bottom-right
     const x = GAME_WIDTH - MAP_DIAMETER - MARGIN
@@ -31,17 +43,17 @@ export default class Minimap {
     this.centerX = x + MAP_DIAMETER / 2
     this.centerY = y + MAP_DIAMETER / 2
 
-    // Faint frame: glassy ring + core nub. Both are pure decoration so
-    // the disc reads as a celestial object rather than a square crop.
+    // Faint frame: glassy ring + core nub. Both are decorative and stay
+    // screen-fixed (outside the rotating container) so the rim doesn't spin.
     this.ring = scene.add.circle(this.centerX, this.centerY, OUTER_R + 3, 0x000000, 0.55)
       .setStrokeStyle(1.5, 0xc8a36b, 0.6)
       .setScrollFactor(0)
       .setDepth(45)
     this.core = scene.add.circle(this.centerX, this.centerY, INNER_R, 0x2a0a00, 1)
       .setScrollFactor(0)
-      .setDepth(46)
+      .setDepth(47)
 
-    // Build the canvas + texture lazily
+    // Build the canvas + texture
     this.canvas = document.createElement('canvas')
     this.canvas.width = MAP_DIAMETER
     this.canvas.height = MAP_DIAMETER
@@ -59,15 +71,31 @@ export default class Minimap {
     this.texture = scene.textures.addCanvas('minimap', this.canvas)
     this.refreshTexture()
 
-    this.mapImage = scene.add.image(this.centerX, this.centerY, 'minimap')
-      .setOrigin(0.5, 0.5)
+    // Rotating container holds the disc image and every marker that sits
+    // on the world (villages, tablets). Setting container.rotation spins
+    // the entire player-relative view. The god dot stays outside so it's
+    // always visually at the top of the disc.
+    this.container = scene.add.container(this.centerX, this.centerY)
       .setScrollFactor(0)
       .setDepth(46)
 
-    // Marker dots (god, villages, tablets) live above the disc
-    this.godDot = scene.add.circle(this.centerX, this.centerY, 2.5, 0xffd700, 1)
+    this.mapImage = scene.add.image(0, 0, 'minimap').setOrigin(0.5, 0.5)
+    this.container.add(this.mapImage)
+
+    // God dot: outside the container, pinned above the disc centre. Its
+    // y-offset varies with the god's depth in the world so shallow = near
+    // the rim, deep = near the core.
+    this.godDot = scene.add.circle(this.centerX, this.centerY - OUTER_R * 0.5, 2.8, 0xffd700, 1)
       .setScrollFactor(0)
-      .setDepth(48)
+      .setDepth(49)
+
+    // A tiny tick on the ring showing where the god points; pure chrome.
+    this.godTick = scene.add.triangle(
+      this.centerX, this.centerY - OUTER_R - 2,
+      0, 3, -3, -3, 3, -3,
+      0xffd700, 1
+    ).setScrollFactor(0).setDepth(49)
+
     this.villageDots = []
 
     this._refreshTimer = 0
@@ -81,7 +109,6 @@ export default class Minimap {
     const lookup = new Uint32Array(MAP_DIAMETER * MAP_DIAMETER)
     const cx = MAP_DIAMETER / 2
     const cy = MAP_DIAMETER / 2
-    const TWO_PI = Math.PI * 2
 
     for (let py = 0; py < MAP_DIAMETER; py++) {
       for (let px = 0; px < MAP_DIAMETER; px++) {
@@ -121,18 +148,35 @@ export default class Minimap {
       if (c == null || typeof c !== 'number') continue
       rgb[key] = [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff]
     }
+    // Void colour for below-surface air tiles. Built as a cool lift of the
+    // sky tone so player-dug tunnels read as luminous threads against the
+    // surrounding stone rather than blending into it. A touch of the
+    // signature accent colour makes the tunnels feel "of this world".
+    const accent = palette.accentColour || 0x406080
+    const aR = (accent >> 16) & 0xff
+    const aG = (accent >> 8) & 0xff
+    const aB = accent & 0xff
+    rgb.void = [
+      Math.min(255, Math.round(skyR * 0.6 + aR * 0.35 + 24)),
+      Math.min(255, Math.round(skyG * 0.6 + aG * 0.35 + 30)),
+      Math.min(255, Math.round(skyB * 0.6 + aB * 0.35 + 44)),
+    ]
     return rgb
   }
 
-  // Repaint the disc from the current grid state. Called on a 4Hz timer
-  // from update(); cheap because of the pre-baked lookup.
+  // Repaint the disc from the current grid state. Called on a timer from
+  // update(); cheap because of the pre-baked lookup. Air tiles are
+  // classified into "sky" (above the column's surface height) or "void"
+  // (below, i.e. natural caves or player-dug tunnels) so the latter stand
+  // out as bright threads rather than blending into the sky band.
   refreshTexture() {
     const grid = this.worldGrid.grid
     const data = this.imageData.data
     const lookup = this.lookup
     const rgb = this.paletteRGB
     const sky = rgb.sky
-    const skyDark = [Math.max(0, sky[0] - 20), Math.max(0, sky[1] - 30), Math.max(0, sky[2] - 40)]
+    const voidCol = rgb.void
+    const surfaceHeights = this.surfaceHeights
 
     for (let i = 0; i < lookup.length; i++) {
       const packed = lookup[i]
@@ -145,12 +189,21 @@ export default class Minimap {
       const tile = grid[gridIdx]
       const colour = rgb[tile]
       if (!colour) {
-        // Air: shade by depth so the sky band reads as atmosphere.
-        // (i / lookup.length) ≈ depth from outer edge for visual effect
-        data[di] = sky[0]
-        data[di + 1] = sky[1]
-        data[di + 2] = sky[2]
-        data[di + 3] = 255
+        // Air tile. Decide if it's sky or a below-surface void.
+        const wx = gridIdx % WORLD_WIDTH
+        const wy = (gridIdx - wx) / WORLD_WIDTH
+        const surfaceY = surfaceHeights ? surfaceHeights[wx] : WORLD_HEIGHT * 0.35
+        if (wy > surfaceY + 2) {
+          data[di] = voidCol[0]
+          data[di + 1] = voidCol[1]
+          data[di + 2] = voidCol[2]
+          data[di + 3] = 255
+        } else {
+          data[di] = sky[0]
+          data[di + 1] = sky[1]
+          data[di + 2] = sky[2]
+          data[di + 3] = 255
+        }
       } else {
         data[di] = colour[0]
         data[di + 1] = colour[1]
@@ -158,53 +211,66 @@ export default class Minimap {
         data[di + 3] = 255
       }
     }
-    void skyDark // reserved for future depth gradient
     this.ctx.putImageData(this.imageData, 0, 0)
     if (this.texture && this.texture.refresh) this.texture.refresh()
   }
 
-  // Forward projection: world tile coordinates to canvas screen coordinates.
-  // Used for placing god/village/tablet dots on top of the disc.
-  projectToScreen(tileX, tileY) {
-    const TWO_PI = Math.PI * 2
+  // Project world tile coordinates to container-LOCAL coordinates on the
+  // disc. The container sits at (centerX, centerY) and rotates as the
+  // player moves, so markers added via this projection ride with the
+  // rotating world.
+  projectLocal(tileX, tileY) {
     const angle = (tileX / WORLD_WIDTH) * TWO_PI - Math.PI / 2
     const norm = Math.min(1, Math.max(0, tileY / WORLD_HEIGHT))
     const r = OUTER_R - norm * (OUTER_R - INNER_R)
-    return {
-      x: this.centerX + Math.cos(angle) * r,
-      y: this.centerY + Math.sin(angle) * r,
-    }
+    return { x: Math.cos(angle) * r, y: Math.sin(angle) * r }
+  }
+
+  // Radius on the disc for a given tile y. Used to place the god dot
+  // along the top of the disc at the correct depth.
+  radiusFor(tileY) {
+    const norm = Math.min(1, Math.max(0, tileY / WORLD_HEIGHT))
+    return OUTER_R - norm * (OUTER_R - INNER_R)
   }
 
   addVillageMarker(village) {
     const dot = this.scene.add.circle(0, 0, 2.5, 0xdaa520, 1)
-      .setScrollFactor(0)
-      .setDepth(48)
-    const p = this.projectToScreen(village.tileX, village.tileY)
+    const p = this.projectLocal(village.tileX, village.tileY)
     dot.x = p.x
     dot.y = p.y
+    this.container.add(dot)
     this.villageDots.push(dot)
+    return dot
   }
 
   addTabletMarker(tablet) {
     if (tablet.collected) return null
     const dot = this.scene.add.circle(0, 0, 2, 0x00ffaa, 0.95)
-      .setScrollFactor(0)
-      .setDepth(48)
-    const p = this.projectToScreen(tablet.tileX, tablet.tileY)
+    const p = this.projectLocal(tablet.tileX, tablet.tileY)
     dot.x = p.x
     dot.y = p.y
+    this.container.add(dot)
     return dot
   }
 
   update(godSprite, delta = 16) {
-    // Track the god dot every frame
-    const tx = godSprite.x / TILE_SIZE
-    const ty = godSprite.y / TILE_SIZE
-    const wrappedTx = ((tx % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
-    const p = this.projectToScreen(wrappedTx, ty)
-    this.godDot.x = p.x
-    this.godDot.y = p.y
+    // Wrap the god's column into the world range so it's continuous
+    // across the seamless horizontal wrap.
+    const godTileXRaw = godSprite.x / TILE_SIZE
+    const godTileX = ((godTileXRaw % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
+    const godTileY = godSprite.y / TILE_SIZE
+
+    // Rotate the container so the god's column always ends up at the
+    // top (north). projectLocal puts tileX 0 at angle -π/2 and advances
+    // clockwise, so rotating by -(godTileX / W) * 2π drags the god's
+    // column into the north slot.
+    const rot = -(godTileX / WORLD_WIDTH) * TWO_PI
+    this.container.rotation = rot
+
+    // Pin the god dot to the top of the disc at a radius matching depth.
+    const r = this.radiusFor(godTileY)
+    this.godDot.x = this.centerX
+    this.godDot.y = this.centerY - r
 
     // Throttled texture refresh so dug terrain, water flow, and lava
     // erosion all propagate without burning a refresh every frame.

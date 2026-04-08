@@ -46,7 +46,7 @@ export default class ParticleEngine {
     this.surfaceHeights = surfaceHeights
 
     // Colour banks keyed by particle type, sourced from the world palette
-    const palette = buildPalette(params.element1, params.element2, params.elementRatio)
+    const palette = buildPalette(params)
     this.colours = {
       ember:      [palette[TILES.LAVA] || 0xff4500, 0xff6600, 0xff3300],
       smoke:      [0x666666, 0x777777, 0x555555],

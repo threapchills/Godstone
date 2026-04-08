@@ -135,9 +135,21 @@ export default class ParallaxSky {
     const dayBoost = 0xddeeff
     const horizonAmber = 0xff9966
 
+    // Altitude brightening: when the camera rises above the average
+    // surface row, blend toward the day boost regardless of time of
+    // day. This gives a "higher = thinner air, brighter light" feel
+    // that pairs with the depth darkening below ground.
+    // ascend 0 at/below surface, ~1 one full viewport above.
+    let ascend = 0
+    if (this.scene?.surfaceRowY != null) {
+      const surfacePx = this.scene.surfaceRowY * 8 // TILE_SIZE
+      const camMid = cam.scrollY + cam.height / 2
+      ascend = Math.max(0, Math.min(1, (surfacePx - camMid) / (cam.height * 0.8)))
+    }
+
     // Animate base rectangle colour through the cycle
     let skyColour = this._blend(nightTint, this.baseSky, 0.4 + day * 0.6)
-    skyColour = this._blend(skyColour, dayBoost, day * 0.25)
+    skyColour = this._blend(skyColour, dayBoost, day * 0.25 + ascend * 0.30)
     skyColour = this._blend(skyColour, horizonAmber, horizonGlow * 0.35)
     this.baseRect.fillColor = skyColour
 
@@ -148,7 +160,7 @@ export default class ParallaxSky {
 
       // Cycle the tint through day/night so distant layers feel atmospheric
       let tint = this._blend(nightTint, layer.baseTint, 0.3 + day * 0.7)
-      tint = this._blend(tint, dayBoost, day * 0.15)
+      tint = this._blend(tint, dayBoost, day * 0.15 + ascend * 0.20)
       tint = this._blend(tint, horizonAmber, horizonGlow * 0.25)
       layer.sprite.setTint(tint)
     }

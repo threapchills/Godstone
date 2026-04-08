@@ -190,7 +190,7 @@ export default class Village {
     this.params = params
 
     // Element-tinted building colours (base browns shifted toward element hue)
-    const palette = buildPalette(params.element1, params.element2, params.elementRatio)
+    const palette = buildPalette(params)
     const accent = palette[TILES.SURFACE] || 0x7a6a4a
     this.wallColour = blendHex(0x9a8a6a, accent, 0.25)
     this.roofColour = blendHex(0x5a4a2a, accent, 0.3)

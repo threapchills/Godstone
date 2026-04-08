@@ -86,6 +86,11 @@ export function generateWorld(params) {
   const gradientScale = WORLD_HEIGHT * 0.35
   const threshold = -0.05 + sparseDense * 0.1
 
+  // Solid core boundaries. Everything below coreTop is either bedrock (upper
+  // tier) or molten core (lower tier); these are both uncarvable.
+  const coreTop = WORLD_HEIGHT - (TERRAIN.BEDROCK_DEPTH + TERRAIN.CORE_DEPTH)
+  const magmaTop = WORLD_HEIGHT - TERRAIN.CORE_DEPTH
+
   for (let x = 0; x < WORLD_WIDTH; x++) {
     for (let y = 0; y < WORLD_HEIGHT; y++) {
       // Linear depth gradient: deeper = denser
@@ -100,7 +105,12 @@ export function generateWorld(params) {
       // Surface roughness
       density += noise2D(x * 0.05 + 1000, y * 0.05 + 1000) * 0.08
 
-      if (y >= WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH) {
+      if (y >= magmaTop) {
+        // Molten core: magma rock with occasional lava inclusions driven
+        // by a slow noise so veins read as natural pockets rather than noise.
+        const veinN = noise2D_c(x * 0.08, y * 0.12)
+        grid[idx(x, y)] = veinN > 0.35 ? TILES.LAVA : TILES.MAGMA_ROCK
+      } else if (y >= coreTop) {
         grid[idx(x, y)] = TILES.BEDROCK
       } else if (y < 3) {
         grid[idx(x, y)] = TILES.AIR
@@ -129,6 +139,10 @@ export function generateWorld(params) {
   recomputeSurface()
 
   // ── Pass 2: large chambers for underground biomes ─────────
+  // Clamped above the solid core so chambers never bite into the planet's
+  // molten heart. "coreTop" is where bedrock begins; chambers must stay
+  // at least a few tiles above it for visual buffer.
+  const coreGuard = coreTop - 4
 
   const chamberCount = 3 + Math.floor(rng4() * 5)
   for (let i = 0; i < chamberCount; i++) {
@@ -145,7 +159,7 @@ export function generateWorld(params) {
 
         const gx = ((cx + dx) % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH
         const gy = cy + dy
-        if (gy <= 3 || gy >= WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH) continue
+        if (gy <= 3 || gy >= coreGuard) continue
         grid[idx(gx, gy)] = TILES.AIR
       }
     }
@@ -159,7 +173,7 @@ export function generateWorld(params) {
     const sx = Math.floor(rng4() * WORLD_WIDTH)
     const topY = Math.floor(surfaceHeights[sx])
     const depth = 40 + Math.floor(rng4() * 100)
-    const bottomY = Math.min(topY + depth, WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 5)
+    const bottomY = Math.min(topY + depth, coreGuard - 1)
     const w = 2 + Math.floor(rng4() * 3)
 
     for (let y = topY; y < bottomY; y++) {
@@ -185,7 +199,7 @@ export function generateWorld(params) {
 
   for (let x = 0; x < WORLD_WIDTH; x++) {
     const startY = Math.floor(surfaceHeights[x]) + 8
-    for (let y = startY; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 5; y++) {
+    for (let y = startY; y < coreGuard; y++) {
       if (grid[idx(x, y)] === TILES.STONE) {
         const n1 = Math.abs(noise2D_b(x * labyrinthScale + 5000, y * labyrinthScale + 5000))
         const n2 = Math.abs(noise2D_b(x * labyrinthScaleB + 9100, y * labyrinthScaleB + 9100))
@@ -204,7 +218,7 @@ export function generateWorld(params) {
   const dilateMarks = []
   for (let x = 0; x < WORLD_WIDTH; x++) {
     const surfaceMin = Math.floor(surfaceHeights[x]) + 4
-    for (let y = surfaceMin; y < WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - 4; y++) {
+    for (let y = surfaceMin; y < coreGuard; y++) {
       if (grid[idx(x, y)] !== TILES.STONE) continue
       // Wraparound x for neighbour checks
       const xl = ((x - 1) + WORLD_WIDTH) % WORLD_WIDTH

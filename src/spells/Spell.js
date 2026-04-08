@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
-import { TILES, LIQUID_TILES } from '../world/TileTypes.js'
+import { TILES, LIQUID_TILES, renderIdFor } from '../world/TileTypes.js'
 import { COMBAT } from '../combat/Combat.js'
 
 // Base class: every spell has a name, glyph, cooldown, and a cast(scene, x, y)
@@ -123,12 +123,25 @@ export class BoltSpell extends Spell {
     // Hit detection: any enemy god whose centre is within 12 px of the
     // line segment takes damage. Distance from a point to a segment is
     // the cleanest test for this geometry.
+    const ex2 = sx + ux * reach
+    const ey2 = sy + uy * reach
     if (scene.enemyGod?.alive && scene.enemyGod.sprite) {
       const eg = scene.enemyGod.sprite
-      const ex2 = sx + ux * reach
-      const ey2 = sy + uy * reach
       if (this._segmentHitsPoint(sx, sy, ex2, ey2, eg.x, eg.y - 12, 14)) {
         scene.damageEnemyGod(COMBAT.spells.boltDamage)
+      }
+    }
+
+    // Critters caught along the bolt's path take damage too. Sample a
+    // handful of points along the segment and hit anything inside a
+    // small radius. Cheap and effective given the short critter list.
+    if (scene.critters?.damageInRadius) {
+      const samples = 6
+      for (let i = 0; i <= samples; i++) {
+        const t = i / samples
+        const px = sx + ux * reach * t
+        const py = sy + uy * reach * t
+        scene.critters.damageInRadius(px, py, 10, COMBAT.spells.boltDamage * 0.6)
       }
     }
 
@@ -216,11 +229,12 @@ export class PlaceSpell extends Spell {
           const x = tx + dx
           const y = ty + dy
           if (y < 0 || y >= WORLD_HEIGHT) continue
-          const t = grid[y * WORLD_WIDTH + ((x + WORLD_WIDTH) % WORLD_WIDTH)]
+          const wx = (x + WORLD_WIDTH) % WORLD_WIDTH
+          const t = grid[y * WORLD_WIDTH + wx]
           if (t === TILES.AIR) {
             layer.putTileAt(-1, x + pad, y)
           } else {
-            layer.putTileAt(t, x + pad, y)
+            layer.putTileAt(renderIdFor(t, wx, y), x + pad, y)
           }
         }
       }

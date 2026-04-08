@@ -46,5 +46,10 @@ export const TERRAIN = {
   CAVE_NOISE_SCALE: 0.04,
   CAVE_THRESHOLD: 0.3,
   SOIL_DEPTH: 8,
-  BEDROCK_DEPTH: 6,
+  // The bottom of the world is a two-tier solid mass so the planet reads
+  // as having a core rather than going hollow. Top tier is bedrock (dark
+  // stone); below that sits the molten core (magma rock with lava veins).
+  // Every cave-carving pass is clamped to stay above CORE_DEPTH + BEDROCK_DEPTH.
+  BEDROCK_DEPTH: 8,
+  CORE_DEPTH: 12,
 }

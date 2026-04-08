@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from '../core/Constants.js'
+import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, TERRAIN } from '../core/Constants.js'
 import { generateWorld, findFlatSurface, findCaveSurface, findTabletLocation } from '../world/WorldGenerator.js'
 import { createTilesetTexture, createTilemap, setupCollision, WRAP_PAD } from '../world/WorldRenderer.js'
 import { buildPalette } from '../world/TileTypes.js'
@@ -20,6 +20,7 @@ import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
 import FoliageRenderer from '../world/FoliageRenderer.js'
+import MossLayer from '../world/MossLayer.js'
 // ParallaxForeground removed: produced ghostly floating silhouettes
 
 const VILLAGE_COUNT = 4
@@ -40,7 +41,7 @@ export default class WorldScene extends Phaser.Scene {
     const params = this.params
 
     // Set sky colour
-    const palette = buildPalette(params.element1, params.element2, params.elementRatio)
+    const palette = buildPalette(params)
     this.baseSkyColour = palette.skyColour
     this.cameras.main.setBackgroundColor(this.baseSkyColour)
 
@@ -189,6 +190,22 @@ export default class WorldScene extends Phaser.Scene {
     ).setScrollFactor(0).setDepth(40)
     this.dayTime = 0
 
+    // Depth feedback overlay: darkens the viewport as the god descends
+    // below the average surface row, using a vertical gradient so the
+    // bottom of the screen always feels a little deeper than the top.
+    // Alpha is redrawn each frame from the camera's y position.
+    this.depthOverlay = this.add.graphics()
+      .setScrollFactor(0)
+      .setDepth(39) // just under the day/night overlay
+
+    // Average surface row (tiles). Used both by the depth overlay and by
+    // the parallax sky's ascend-brightening hook.
+    let surfaceSum = 0
+    for (let i = 0; i < worldData.surfaceHeights.length; i++) {
+      surfaceSum += worldData.surfaceHeights[i]
+    }
+    this.surfaceRowY = surfaceSum / worldData.surfaceHeights.length
+
     // Parallax sky background
     this.parallaxSky = new ParallaxSky(this, params, palette)
 
@@ -210,6 +227,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // Foliage Overlay
     this.foliageRenderer = new FoliageRenderer(this, this.worldGrid, palette)
+
+    // Moss layer: a slowly spreading green film on surface tiles.
+    this.mossLayer = new MossLayer(this, this.worldGrid, params, worldData.surfaceHeights)
 
     // HUD
     this.createHUD(params)
@@ -594,6 +614,36 @@ export default class WorldScene extends Phaser.Scene {
     const nightIntensity = Math.max(0, Math.sin(this.dayTime * Math.PI * 2 - Math.PI / 2)) * 0.4
     this.dayNightOverlay.setAlpha(nightIntensity)
 
+    // Depth feedback overlay. Compares camera midline against the world's
+    // average surface y; at surface the overlay is invisible, at the edge
+    // of the molten core it sits around 0.65 alpha with a vertical gradient
+    // so the bottom of the screen always reads slightly darker than the top.
+    if (this.depthOverlay) {
+      const surfacePx = (this.surfaceRowY || 40) * TILE_SIZE
+      const coreTopPx = (WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - TERRAIN.CORE_DEPTH) * TILE_SIZE
+      const camMid = this.cameras.main.scrollY + GAME_HEIGHT / 2
+      const span = Math.max(1, coreTopPx - surfacePx)
+      const depthT = Math.max(0, Math.min(1, (camMid - surfacePx) / span))
+      // Ease the ramp so the first few tiles below surface feel gentle
+      // and only the deeps get properly heavy.
+      const eased = depthT * depthT
+      const baseAlpha = eased * 0.65
+
+      this.depthOverlay.clear()
+      if (baseAlpha > 0.005) {
+        // Per-corner gradient: top of screen lighter, bottom heavier.
+        // Colours lean cool indigo so the effect reads as gloom, not haze.
+        this.depthOverlay.fillGradientStyle(
+          0x06091e, 0x06091e, 0x000000, 0x000000,
+          baseAlpha * 0.45,
+          baseAlpha * 0.45,
+          baseAlpha * 1.0,
+          baseAlpha * 1.0,
+        )
+        this.depthOverlay.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
+      }
+    }
+
     const isDay = this.dayTime < 0.5
     this.dayNightHUD.setText(isDay ? 'Day' : 'Night')
     this.dayNightHUD.setColor(isDay ? '#ddaa44' : '#6666aa')
@@ -696,6 +746,10 @@ export default class WorldScene extends Phaser.Scene {
 
     // Foliage update (wind sway + destroy burned trees)
     if (this.foliageRenderer) this.foliageRenderer.update(dilatedDelta)
+
+    // Moss layer: slow spread tick + per-frame overlay redraw (cheap,
+    // culled to visible tile range).
+    if (this.mossLayer) this.mossLayer.update(dilatedDelta)
 
     // Tablets: orbiting motes + proximity glow swell + shimmer cue
     if (this.tablets) {
@@ -851,6 +905,7 @@ export default class WorldScene extends Phaser.Scene {
   shutdown() {
     if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
+    if (this.mossLayer) { this.mossLayer.destroy(); this.mossLayer = null }
   }
 
   // ── Enemy spawn / update ─────────────────────────────

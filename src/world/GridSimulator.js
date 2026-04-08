@@ -1,4 +1,4 @@
-import { TILES, SOLID_TILES, LIQUID_TILES } from './TileTypes.js'
+import { TILES, SOLID_TILES, LIQUID_TILES, renderIdFor } from './TileTypes.js'
 
 // Falling-sand simulator: Noita-style cellular automata for liquids,
 // granular solids, fire, and elemental reactions. Runs on the world
@@ -93,22 +93,14 @@ export default class GridSimulator {
     this.moved[idx] = this.generation // mark so it's not re-processed
     if (this.worldGrid.layer) {
       const pad = this.worldGrid.padOffset || 0
-      this.worldGrid.layer.putTileAt(
-        tileId === TILES.AIR ? -1 : tileId,
-        x + pad, y
-      )
+      const renderId = tileId === TILES.AIR ? -1 : renderIdFor(tileId, x, y)
+      this.worldGrid.layer.putTileAt(renderId, x + pad, y)
       // Sync mirrored padding at wrap seam
       if (x < pad) {
-        this.worldGrid.layer.putTileAt(
-          tileId === TILES.AIR ? -1 : tileId,
-          x + pad + this.width, y
-        )
+        this.worldGrid.layer.putTileAt(renderId, x + pad + this.width, y)
       }
       if (x >= this.width - pad) {
-        this.worldGrid.layer.putTileAt(
-          tileId === TILES.AIR ? -1 : tileId,
-          x + pad - this.width, y
-        )
+        this.worldGrid.layer.putTileAt(renderId, x + pad - this.width, y)
       }
     }
   }
@@ -129,13 +121,15 @@ export default class GridSimulator {
     if (this.worldGrid.layer) {
       const t1 = this.grid[idx1]
       const t2 = this.grid[idx2]
-      this.worldGrid.layer.putTileAt(t1 === TILES.AIR ? -1 : t1, x1 + pad, y1)
-      this.worldGrid.layer.putTileAt(t2 === TILES.AIR ? -1 : t2, x2 + pad, y2)
+      const r1 = t1 === TILES.AIR ? -1 : renderIdFor(t1, x1, y1)
+      const r2 = t2 === TILES.AIR ? -1 : renderIdFor(t2, x2, y2)
+      this.worldGrid.layer.putTileAt(r1, x1 + pad, y1)
+      this.worldGrid.layer.putTileAt(r2, x2 + pad, y2)
       // Sync wrap padding
-      if (x1 < pad) this.worldGrid.layer.putTileAt(t1 === TILES.AIR ? -1 : t1, x1 + pad + this.width, y1)
-      if (x1 >= this.width - pad) this.worldGrid.layer.putTileAt(t1 === TILES.AIR ? -1 : t1, x1 + pad - this.width, y1)
-      if (x2 < pad) this.worldGrid.layer.putTileAt(t2 === TILES.AIR ? -1 : t2, x2 + pad + this.width, y2)
-      if (x2 >= this.width - pad) this.worldGrid.layer.putTileAt(t2 === TILES.AIR ? -1 : t2, x2 + pad - this.width, y2)
+      if (x1 < pad) this.worldGrid.layer.putTileAt(r1, x1 + pad + this.width, y1)
+      if (x1 >= this.width - pad) this.worldGrid.layer.putTileAt(r1, x1 + pad - this.width, y1)
+      if (x2 < pad) this.worldGrid.layer.putTileAt(r2, x2 + pad + this.width, y2)
+      if (x2 >= this.width - pad) this.worldGrid.layer.putTileAt(r2, x2 + pad - this.width, y2)
     }
   }
 
