@@ -1,18 +1,24 @@
-import { BoltSpell, PlaceSpell, GeasSpell } from './Spell.js'
+import { BoltSpell, PlaceSpell, GeasSpell, ElementalBurstSpell } from './Spell.js'
 
 // The player's spell loadout, with progressive unlocks tied to total
 // tablets ever picked up. Owns the active selection, dispatches casts,
 // and ticks down per-spell cooldowns.
+//
+// Slot order: bolt → elemental burst → place → geas. Bolt is the first
+// gift; the elemental burst is the second, biggest, and the spell that
+// makes the world's element matter mechanically; place and geas are
+// the utility / soft-power tail.
 
-const UNLOCK_ORDER = ['bolt', 'place', 'geas']
+const UNLOCK_ORDER = ['bolt', 'burst', 'place', 'geas']
 
 export default class SpellBook {
   constructor(params) {
     this.params = params
-    // Build all three spells up front; the unlock check just gates which
+    // Build all four spells up front; the unlock check just gates which
     // are usable at any given moment.
     this.allSpells = {
       bolt: new BoltSpell(),
+      burst: new ElementalBurstSpell(params.element1),
       place: new PlaceSpell(params.element1),
       geas: new GeasSpell(),
     }
@@ -22,9 +28,9 @@ export default class SpellBook {
 
   // unlockCount: how many slots are visible. Derived from the god's
   // highest tablet level (since tablets are persistent and incremental):
-  // 0 = none, 1 = bolt, 2 = bolt+place, 3+ = full loadout.
+  // 0 = none, 1 = bolt, 2 = +burst, 3 = +place, 4+ = full loadout.
   setUnlockCount(highestTablet) {
-    this.unlockedCount = Math.min(3, highestTablet)
+    this.unlockedCount = Math.min(4, highestTablet)
   }
 
   unlockedSpells() {

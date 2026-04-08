@@ -13,7 +13,7 @@ export default class SpellBar {
     this.scene = scene
     this.slots = []
 
-    const totalW = SLOT_W * 3 + SLOT_GAP * 2
+    const totalW = SLOT_W * 4 + SLOT_GAP * 3
     const baseX = (GAME_WIDTH - totalW) / 2
     const baseY = GAME_HEIGHT - SLOT_H - 18
 
@@ -34,13 +34,13 @@ export default class SpellBar {
       .setScrollFactor(0).setDepth(50)
     this.manaFill = scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2, manaY, manaW, 4, 0x4488dd, 1)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
-    // Tick marks splitting the bar into 3 segments (one per spell)
+    // Tick marks splitting the bar into 3 segments (one per mana point)
     for (let i = 1; i < 3; i++) {
       scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / 3), manaY, 1, 4, 0x000000, 0.6)
         .setScrollFactor(0).setDepth(52)
     }
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const x = baseX + i * (SLOT_W + SLOT_GAP)
       const cx = x + SLOT_W / 2
       const cy = baseY + SLOT_H / 2
@@ -73,7 +73,8 @@ export default class SpellBar {
   }
 
   _ensureSlotGlyph(slotIdx) {
-    const keys = ['spell-bolt', 'spell-place', 'spell-geas']
+    // Slot order matches SpellBook UNLOCK_ORDER: bolt, burst, place, geas
+    const keys = ['spell-bolt', 'spell-burst', 'spell-place', 'spell-geas']
     const key = keys[slotIdx]
     if (this.scene.textures.exists(key)) return key
 
@@ -95,6 +96,29 @@ export default class SpellBar {
       ctx.closePath()
       ctx.fill()
     } else if (slotIdx === 1) {
+      // Burst: a four-rayed sun. Tinted by element name on first build
+      // so each god gets their own glyph colour.
+      const elem = this.scene.params?.element1 || 'fire'
+      const burstColours = {
+        fire:  '#ff7733',
+        water: '#5588ee',
+        air:   '#ddeeff',
+        earth: '#aa7733',
+      }
+      ctx.fillStyle = burstColours[elem] || '#ffffff'
+      ctx.beginPath()
+      ctx.arc(11, 11, 4, 0, Math.PI * 2)
+      ctx.fill()
+      // Four rays
+      ctx.strokeStyle = burstColours[elem] || '#ffffff'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(11, 1); ctx.lineTo(11, 6)
+      ctx.moveTo(11, 21); ctx.lineTo(11, 16)
+      ctx.moveTo(1, 11); ctx.lineTo(6, 11)
+      ctx.moveTo(21, 11); ctx.lineTo(16, 11)
+      ctx.stroke()
+    } else if (slotIdx === 2) {
       // Place: stack of small squares
       ctx.fillStyle = '#aa8866'
       ctx.fillRect(4, 14, 14, 4)

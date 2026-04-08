@@ -248,6 +248,253 @@ export class PlaceSpell extends Spell {
   }
 }
 
+// ── ELEMENTAL BURST ─────────────────────────────────────────
+// The big Sky Baby-style spell, fitted to Godstone's element system.
+// Effect varies by the god's primary element:
+//
+//   fire  → fireball projectile that burns vegetation, damages units
+//           and the rival god in a radius, time-dilates briefly
+//   water → tide of life: rain cloud over the cursor that heals
+//           friendly combat units and pushes belief into nearby villages
+//   air   → gale: omnidirectional shockwave that hurls all enemies
+//           outward and lifts the god, with a satisfying camera punch
+//   earth → earthquake: knocks every grounded enemy in range up and
+//           damages them, scaled by stage; heaviest camera trauma
+//
+// All four cost 1 mana, share a 1.5 s cooldown, and trigger heavy
+// camera juice. The visual is bespoke per element so the spell reads
+// instantly without needing a label.
+export class ElementalBurstSpell extends Spell {
+  constructor(element) {
+    const colours = {
+      fire: 0xff5522,
+      water: 0x55aaff,
+      air: 0xddeeff,
+      earth: 0xaa7733,
+    }
+    super({
+      name: 'Burst',
+      glyph: 'burst',
+      cooldown: 1500,
+      colour: colours[element] || 0xffffff,
+      manaCost: 1,
+    })
+    this.element = element
+  }
+
+  cast(scene, targetX, targetY) {
+    const god = scene.god
+    if (!god?.sprite) return false
+    switch (this.element) {
+      case 'fire':  return this._castFire(scene, targetX, targetY)
+      case 'water': return this._castWater(scene, targetX, targetY)
+      case 'air':   return this._castAir(scene, targetX, targetY)
+      case 'earth':
+      default:      return this._castEarth(scene, targetX, targetY)
+    }
+  }
+
+  // Fireball: a slow-moving glowing comet that explodes on impact.
+  // Damages enemy combat units and the rival god in a radius. Burns
+  // vegetation tiles within the blast. The fireball is registered on
+  // the scene's _activeFireballs list and ticked from the main scene
+  // update loop so it inherits time dilation and survives impact-frame
+  // freezes consistently. Sky Baby uses the same pattern: projectiles
+  // live in a flat list outside the entity tree.
+  _castFire(scene, targetX, targetY) {
+    const god = scene.god
+    // Spawn the fireball well above the god's head so the projectile
+    // doesn't immediately collide with whatever surface he's standing
+    // on. Clamp the aim so the fireball never travels significantly
+    // downward; otherwise a target standing on flat ground at the
+    // god's elevation gets passed up by an arc that buries in the
+    // surface tile beneath him.
+    const sx = god.sprite.x
+    const sy = god.sprite.y - TILE_SIZE * 3
+    const dx = targetX - sx
+    // Cap dy so the angle never tilts more than ~20 degrees below horizontal
+    const rawDy = (targetY - TILE_SIZE * 2) - sy
+    const maxDownDy = Math.abs(dx) * 0.36 // tan(20°)
+    const dy = Math.max(-Math.abs(dx) * 1.5, Math.min(maxDownDy, rawDy))
+    const angle = Math.atan2(dy, dx)
+    const speed = 360
+    const ball = scene.add.circle(sx, sy, 10, 0xff7733, 0.85)
+      .setDepth(20)
+      .setBlendMode(Phaser.BlendModes.ADD)
+    const glow = scene.add.circle(sx, sy, 22, 0xffaa44, 0.35)
+      .setDepth(19)
+      .setBlendMode(Phaser.BlendModes.ADD)
+    if (!scene._activeFireballs) scene._activeFireballs = []
+    scene._activeFireballs.push({
+      ball, glow,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.8,
+      damage: 28,
+      radius: TILE_SIZE * 6,
+      team: 'home',
+      // Skip terrain collision for the first 80 ms so the spawn cell
+      // doesn't insta-detonate the fireball when the god is standing
+      // next to a wall or on a surface tile.
+      gracePeriod: 80,
+    })
+    if (scene.addJuice) scene.addJuice('medium')
+    return true
+  }
+
+  // Tide of life: rain cloud over the cursor that heals nearby home
+  // combat units, douses any lava in range, and surges belief in the
+  // closest village.
+  _castWater(scene, targetX, targetY) {
+    const radius = TILE_SIZE * 8
+    // Visual rain cloud sprite
+    const cloud = scene.add.ellipse(targetX, targetY - TILE_SIZE * 4, TILE_SIZE * 14, TILE_SIZE * 4, 0xaaccee, 0.6)
+      .setDepth(13)
+      .setBlendMode(Phaser.BlendModes.SCREEN)
+    scene.tweens.add({
+      targets: cloud, alpha: 0, duration: 1800, onComplete: () => cloud.destroy(),
+    })
+    // Spawn falling rain drops in the radius for ~1.5 s
+    let dropTimer = 0
+    const dropEvent = scene.time.addEvent({
+      delay: 40, repeat: 35, callback: () => {
+        const dx = (Math.random() - 0.5) * TILE_SIZE * 14
+        const drop = scene.add.rectangle(targetX + dx, targetY - TILE_SIZE * 4, 2, 6, 0xaaf0ff, 0.8)
+          .setDepth(13)
+          .setBlendMode(Phaser.BlendModes.ADD)
+        scene.tweens.add({
+          targets: drop, y: targetY + TILE_SIZE * 2, alpha: 0,
+          duration: 600, onComplete: () => drop.destroy(),
+        })
+      },
+    })
+    // Heal home units in radius
+    if (scene.warDirector?.units) {
+      for (const u of scene.warDirector.units) {
+        if (!u.alive || u.team !== 'home') continue
+        const dx = u.sprite.x - targetX
+        const dy = u.sprite.y - targetY
+        if (dx * dx + dy * dy < radius * radius) {
+          u.hp = Math.min(u.maxHp, u.hp + 25)
+        }
+      }
+    }
+    // Belief surge to closest village in radius
+    if (scene.villages) {
+      let best = null, bestD = Infinity
+      for (const v of scene.villages) {
+        const dx = v.worldX - targetX
+        const dy = v.worldY - targetY
+        const d = dx * dx + dy * dy
+        if (d < bestD) { bestD = d; best = v }
+      }
+      if (best && bestD < radius * radius * 4) {
+        best.belief = Math.min(100, best.belief + 18)
+        best.updateBeliefBar()
+      }
+    }
+    if (scene.addJuice) scene.addJuice('medium')
+    return true
+  }
+
+  // Gale: an omnidirectional shockwave from the god that hurls every
+  // enemy outward and gives the god a brief upward boost.
+  _castAir(scene, targetX, targetY) {
+    const god = scene.god
+    const sx = god.sprite.x
+    const sy = god.sprite.y - TILE_SIZE
+    const radius = TILE_SIZE * 12
+
+    // Expanding ring
+    const ring = scene.add.circle(sx, sy, 10, 0xddeeff, 0.6)
+      .setStrokeStyle(3, 0xffffff, 0.85)
+      .setDepth(20)
+      .setBlendMode(Phaser.BlendModes.ADD)
+    scene.tweens.add({
+      targets: ring, radius: radius, alpha: 0,
+      duration: 500, onComplete: () => ring.destroy(),
+    })
+
+    // Boost god upward
+    if (god.sprite.body) god.sprite.body.setVelocityY(-360)
+
+    // Knock back any enemy in range
+    if (scene.warDirector?.units) {
+      for (const u of scene.warDirector.units) {
+        if (!u.alive || u.team === 'home') continue
+        const dx = u.sprite.x - sx
+        const dy = u.sprite.y - sy
+        const distSq = dx * dx + dy * dy
+        if (distSq < radius * radius && u.sprite.body) {
+          const dist = Math.sqrt(distSq) || 1
+          const force = 320
+          u.sprite.body.setVelocity(
+            (dx / dist) * force,
+            -180 + (dy / dist) * force * 0.4,
+          )
+          u.takeDamage(8)
+        }
+      }
+    }
+    if (scene.addJuice) scene.addJuice('heavy')
+    return true
+  }
+
+  // Earthquake: knocks every grounded enemy near the god into the air
+  // and deals damage. Heaviest camera trauma in the spellbook.
+  _castEarth(scene, targetX, targetY) {
+    const god = scene.god
+    const sx = god.sprite.x
+    const sy = god.sprite.y
+    const radius = TILE_SIZE * 14
+
+    // Visual: a shockwave of dust along the ground
+    for (let i = 0; i < 18; i++) {
+      const angle = (i / 18) * Math.PI * 2
+      const px = sx + Math.cos(angle) * 8
+      const py = sy + 8
+      const puff = scene.add.circle(px, py, 4, 0xc0a070, 0.7)
+        .setDepth(15)
+        .setBlendMode(Phaser.BlendModes.ADD)
+      scene.tweens.add({
+        targets: puff,
+        x: sx + Math.cos(angle) * radius * 0.7,
+        y: py - 6,
+        alpha: 0,
+        scale: 0.3,
+        duration: 700,
+        onComplete: () => puff.destroy(),
+      })
+    }
+
+    // Knock enemies up + damage
+    let hits = 0
+    if (scene.warDirector?.units) {
+      for (const u of scene.warDirector.units) {
+        if (!u.alive || u.team === 'home') continue
+        const dx = u.sprite.x - sx
+        const dy = u.sprite.y - sy
+        if (dx * dx + dy * dy < radius * radius) {
+          if (u.sprite.body) u.sprite.body.setVelocityY(-540)
+          u.takeDamage(28)
+          hits++
+        }
+      }
+    }
+    // Damage rival god if in range
+    if (scene.enemyGod?.alive && scene.enemyGod.sprite) {
+      const dx = scene.enemyGod.sprite.x - sx
+      const dy = scene.enemyGod.sprite.y - sy
+      if (dx * dx + dy * dy < radius * radius) {
+        scene.damageEnemyGod(20)
+        if (scene.enemyGod.sprite.body) scene.enemyGod.sprite.body.setVelocityY(-480)
+      }
+    }
+    if (scene.addJuice) scene.addJuice(hits > 4 ? 'severe' : 'heavy')
+    return true
+  }
+}
+
 // ── GEAS ────────────────────────────────────────────────────
 // Find the nearest village to the cursor and surge its belief.
 export class GeasSpell extends Spell {

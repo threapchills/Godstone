@@ -827,6 +827,12 @@ export default class WorldScene extends Phaser.Scene {
     // War Director: raid cycle, combat unit ticking, arrow hit resolution
     if (this.warDirector) this.warDirector.update(dilatedDelta)
 
+    // Tick active fireballs spawned by the elemental burst spell. Lives
+    // outside the WarDirector because spells aren't combat units; they
+    // are short-lived projectiles that need their own collision and AOE
+    // resolution. See ElementalBurstSpell._castFire.
+    if (this._activeFireballs?.length) this._tickFireballs(dilatedDelta)
+
     // Spells: tick cooldowns + refresh HUD
     if (this.spellBook) {
       this.spellBook.setUnlockCount(this.god.highestTablet)
@@ -1096,6 +1102,97 @@ export default class WorldScene extends Phaser.Scene {
   damageEnemyGod(amount) {
     if (!this.enemyGod || !this.enemyGod.alive) return
     this.enemyGod.takeDamage(amount)
+  }
+
+  // Frame tick for fireballs spawned by the burst spell. Each fireball
+  // is a small object holding two display sprites (the bright core and
+  // its glow halo), a velocity, and the radius/damage to apply on
+  // impact. The function steps each one, samples the world grid for
+  // terrain hits, and resolves the AOE on detonation.
+  _tickFireballs(delta) {
+    const dt = delta / 1000
+    const list = this._activeFireballs
+    for (let i = list.length - 1; i >= 0; i--) {
+      const fb = list[i]
+      fb.life -= dt
+      fb.ball.x += fb.vx * dt
+      fb.ball.y += fb.vy * dt
+      fb.glow.x = fb.ball.x
+      fb.glow.y = fb.ball.y
+
+      // Trail mote
+      const trail = this.add.circle(
+        fb.ball.x + (Math.random() - 0.5) * 8,
+        fb.ball.y + (Math.random() - 0.5) * 8,
+        3, 0xff5522, 0.7,
+      ).setDepth(19).setBlendMode(Phaser.BlendModes.ADD)
+      this.tweens.add({ targets: trail, alpha: 0, scale: 0.2, duration: 380, onComplete: () => trail.destroy() })
+
+      // Tile collision (skipped during grace period so the spawn cell
+      // can't immediately blow the fireball up if the god is leaning
+      // against a wall or standing on a surface tile)
+      let exploded = fb.life <= 0
+      if (fb.gracePeriod > 0) fb.gracePeriod -= delta
+      const grid = this.worldGrid?.grid
+      if (grid && !exploded && fb.gracePeriod <= 0) {
+        const tx = Math.floor(fb.ball.x / TILE_SIZE)
+        const ty = Math.floor(fb.ball.y / TILE_SIZE)
+        if (tx >= 0 && tx < WORLD_WIDTH && ty >= 0 && ty < WORLD_HEIGHT) {
+          const tile = grid[ty * WORLD_WIDTH + tx]
+          // Solid (non air, non vegetation, non liquid) triggers a hit
+          if (tile !== 0 && tile !== 16 && tile !== 17 && tile !== 18 && tile !== 19 && tile !== 20) {
+            if (tile !== 5 && tile !== 13 && tile !== 6) exploded = true
+          }
+        }
+      }
+
+      // Direct unit hit (bypass radius check for early detonation)
+      if (!exploded && this.warDirector?.units) {
+        for (const u of this.warDirector.units) {
+          if (!u.alive || u.team === fb.team) continue
+          const dx = u.sprite.x - fb.ball.x
+          const dy = u.sprite.y - fb.ball.y
+          if (dx * dx + dy * dy < 200) { exploded = true; break }
+        }
+      }
+
+      if (exploded) {
+        // Detonation ring
+        const ring = this.add.circle(fb.ball.x, fb.ball.y, 8, 0xffcc66, 0.7)
+          .setDepth(20)
+          .setBlendMode(Phaser.BlendModes.ADD)
+        this.tweens.add({
+          targets: ring,
+          radius: fb.radius,
+          alpha: 0,
+          duration: 450,
+          onComplete: () => ring.destroy(),
+        })
+        // AOE damage to enemy combat units
+        if (this.warDirector?.units) {
+          for (const u of this.warDirector.units) {
+            if (!u.alive || u.team === fb.team) continue
+            const dx = u.sprite.x - fb.ball.x
+            const dy = u.sprite.y - fb.ball.y
+            if (dx * dx + dy * dy < fb.radius * fb.radius) {
+              u.takeDamage(fb.damage)
+            }
+          }
+        }
+        // Damage rival god in range too
+        if (this.enemyGod?.alive && this.enemyGod.sprite) {
+          const dx = this.enemyGod.sprite.x - fb.ball.x
+          const dy = this.enemyGod.sprite.y - fb.ball.y
+          if (dx * dx + dy * dy < fb.radius * fb.radius) {
+            this.damageEnemyGod(fb.damage * 1.5)
+          }
+        }
+        if (this.addJuice) this.addJuice('heavy')
+        fb.ball.destroy()
+        fb.glow.destroy()
+        list.splice(i, 1)
+      }
+    }
   }
 
   // ── Spell input ──────────────────────────────────────
