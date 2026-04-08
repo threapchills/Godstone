@@ -19,6 +19,7 @@ import BiomeFlora from '../world/BiomeFlora.js'
 import AmbienceEngine from '../sound/AmbienceEngine.js'
 import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
+import WeatherSystem from '../world/WeatherSystem.js'
 import FoliageRenderer from '../world/FoliageRenderer.js'
 import MossLayer from '../world/MossLayer.js'
 // ParallaxForeground removed: produced ghostly floating silhouettes
@@ -239,6 +240,14 @@ export default class WorldScene extends Phaser.Scene {
 
     // Grid Sand Simulator
     this.gridSimulator = new GridSimulator(this, this.worldGrid)
+
+    // Weather: drifting clouds, rainfall that replenishes surface water,
+    // humidity driven by evaporation events coming out of GridSimulator.
+    // The closed loop is the whole point: liquids that evaporate out of
+    // exposed bodies come back as rain somewhere else, so the planet
+    // never drains into a single puddle at the core.
+    this.weather = new WeatherSystem(this, this.worldGrid, params)
+    this._lastEvaporationTime = 0
 
     // Foliage Overlay
     this.foliageRenderer = new FoliageRenderer(this, this.worldGrid, palette)
@@ -756,7 +765,27 @@ export default class WorldScene extends Phaser.Scene {
         }
       }
 
+      // Evaporation pass: once every 900 ms, walk a dozen random water
+      // tiles in the active chunk and evaporate any exposed to open sky.
+      // Each event bumps the weather system's humidity, which feeds the
+      // rain rate, closing the water cycle. The evaporation events are
+      // also passed to processGridEvents via the shared events queue.
+      if (time - this._lastEvaporationTime > 900) {
+        this._lastEvaporationTime = time
+        this.gridSimulator.evaporateInChunk(activeRect, 12)
+      }
+
+      // Weather ingests any vapour events the simulator emitted this tick
+      // (both from evaporateInChunk and from natural lava-water reactions)
+      if (this.weather) this.weather.ingestGridEvents(this.gridSimulator.events)
+
       this.processGridEvents()
+    }
+
+    // Drift clouds and fall rain drops. Pass the real camera so clouds
+    // only spawn drops near the player's viewport.
+    if (this.weather) {
+      this.weather.update(dilatedDelta, this.cameras.main)
     }
 
     // Foliage update (wind sway + destroy burned trees)
@@ -863,6 +892,13 @@ export default class WorldScene extends Phaser.Scene {
           this.spawnGridParticle(wx + 3, wy - 2, 0xdddddd, -15, -35, 700)
           break
 
+        case 'vapour':
+          // Slow evaporation puff. Lighter and slower than the lava-water
+          // hiss so the player can tell the two reactions apart.
+          this.spawnGridParticle(wx, wy, 0xe8f0ff, -4, -18, 1200)
+          this.spawnGridParticle(wx + 2, wy - 1, 0xffffff, 4, -20, 1000)
+          break
+
         case 'hiss':
           if (soundCount < maxSounds && this.ambience?.initialized) {
             this.ambience.playHiss()
@@ -921,6 +957,7 @@ export default class WorldScene extends Phaser.Scene {
     if (this.particles) { this.particles.destroy(); this.particles = null }
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
     if (this.mossLayer) { this.mossLayer.destroy(); this.mossLayer = null }
+    if (this.weather) { this.weather.shutdown(); this.weather = null }
   }
 
   // ── Enemy spawn / update ─────────────────────────────

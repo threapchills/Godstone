@@ -348,6 +348,52 @@ export default class GridSimulator {
     }
   }
 
+  // ── Evaporation ────────────────────────────────────────
+  // Called externally on a slow timer. Scans a handful of random water
+  // tiles in the active chunk and removes those with an open sky column
+  // above them, emitting a 'vapour' event that the weather system reads
+  // as "this world is humid, spawn a cloud soon". Closes the water loop:
+  // without this, every liquid particle eventually pools at the bottom.
+  //
+  // sampleCount is small on purpose: evaporation is meant to be visible
+  // over minutes of play, not seconds. A few tiles per tick is enough
+  // to keep large surface lakes slowly shrinking without making puddles
+  // vanish before the player notices them.
+  evaporateInChunk(activeRect, sampleCount = 12) {
+    const evaporated = []
+    const startX = Math.max(0, activeRect.x)
+    const startY = Math.max(0, activeRect.y)
+    const endX = Math.min(this.width, activeRect.x + activeRect.w)
+    const endY = Math.min(this.height, activeRect.y + activeRect.h)
+    if (endX <= startX || endY <= startY) return evaporated
+
+    for (let i = 0; i < sampleCount; i++) {
+      const x = startX + Math.floor(Math.random() * (endX - startX))
+      const y = startY + Math.floor(Math.random() * (endY - startY))
+      const tile = this.getTile(x, y)
+      if (tile !== TILES.WATER) continue // only shallow water evaporates; DEEP_WATER is too dense
+
+      // Need a clear vertical column to the sky. Walk upward; if we hit
+      // any solid before y=0 we're inside a cave and don't evaporate.
+      // Cap the walk so a tile near the surface doesn't waste cycles
+      // scanning to the top of the world.
+      let clear = true
+      for (let uy = y - 1; uy >= Math.max(0, y - 40); uy--) {
+        const t = this.getTile(x, uy)
+        if (t === TILES.AIR) continue
+        if (this.isLiquid(t)) continue // water above is fine; that's the same body
+        clear = false
+        break
+      }
+      if (!clear) continue
+
+      this.setTile(x, y, TILES.AIR)
+      this.emitEvent('vapour', x, y)
+      evaporated.push({ x, y })
+    }
+    return evaporated
+  }
+
   // ── Erosion ─────────────────────────────────────────────
   // Called externally (e.g. once per second) to slowly degrade
   // soil near flowing water. Creates natural cave expansion.
