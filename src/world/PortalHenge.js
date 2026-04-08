@@ -1,14 +1,32 @@
 import { TILE_SIZE } from '../core/Constants.js'
 import { findGroundTileY } from '../utils/Grounding.js'
 
-// The portal henge: a Stonehenge-like structure, one per world.
-// The sole gateway to the omniverse. Phase 1 just renders it;
-// actual portal mechanics come in Phase 4.
+// The portal henge: a Stonehenge-like structure, one per world. The
+// sole gateway to the omniverse. Phase 7 wires actual portal mechanics
+// onto this scaffold:
+//
+//   - DORMANT: untouched. Pulses gently.
+//   - CHOOSING: god is within range, the prompt is up. Player picks
+//     'I' for inbound (an enemy god arrives with an army) or 'O' for
+//     outbound (the god is hurled into a raid world).
+//   - ACTIVE_INBOUND: an invasion is in progress. Re-touching the
+//     portal doesn't reopen the prompt until the invasion resolves.
+//   - ACTIVE_OUTBOUND: the god has travelled. Same lock.
+//   - COOLDOWN: brief settling period after a sortie ends.
+//
+// On a raid world (params.isRaid === true) the portal is the return
+// stone instead. Touching it sends the god home. Each outbound trip
+// allows exactly one round trip; the next portal interaction back home
+// rolls a fresh inbound/outbound choice with a new random raid seed.
 export default class PortalHenge {
   constructor(scene, tileX, tileY, params) {
     this.scene = scene
     this.tileX = tileX
     this.tileY = tileY
+    this.params = params
+    this.state = 'DORMANT'
+    this._cooldownUntil = 0
+    this._promptCooldown = 0
 
     const px = tileX * TILE_SIZE + TILE_SIZE * 3
     const py = tileY * TILE_SIZE
@@ -16,6 +34,42 @@ export default class PortalHenge {
     this.createSprite(scene, px, py, params)
     this.createLabel(scene, px, py)
     this.createGlow(scene, px, py, params)
+  }
+
+  // Distance from the god (in pixels) at which the portal opens its
+  // prompt. Generous so the player doesn't have to thread a needle.
+  get interactionRadius() { return TILE_SIZE * 6 }
+
+  // Update from WorldScene.update each frame. Drives the prompt UI,
+  // dispatches the player's choice when a key is pressed, and ticks
+  // any active cooldown.
+  updateInteraction(time, godSprite) {
+    if (this._cooldownUntil > time) return
+    if (!godSprite) return
+    const dx = godSprite.x - this.worldX
+    const dy = godSprite.y - this.worldY
+    const distSq = dx * dx + dy * dy
+    const r = this.interactionRadius
+    const inRange = distSq < r * r
+
+    // Show the prompt when the god enters range and the portal is idle
+    if (inRange && this.state === 'DORMANT') {
+      this.state = 'CHOOSING'
+      this.scene._showPortalPrompt?.(this)
+    } else if (!inRange && this.state === 'CHOOSING') {
+      // Player walked away without choosing
+      this.state = 'DORMANT'
+      this.scene._hidePortalPrompt?.()
+    }
+  }
+
+  // Called by the scene after a sortie ends so the portal returns to
+  // dormant after a brief cooldown. Lock window keeps the prompt from
+  // re-firing the instant the player steps off.
+  endSortie() {
+    this.state = 'DORMANT'
+    this._cooldownUntil = this.scene.time.now + 4000
+    this.scene._hidePortalPrompt?.()
   }
 
   // Re-snap the portal sprite to the current ground beneath it. The

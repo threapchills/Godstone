@@ -102,11 +102,24 @@ export default class WorldScene extends Phaser.Scene {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
 
+    // Place the portal henge first so the village placement loop can't
+    // saturate the surface and starve the omniverse gateway. The portal
+    // is the most important entity on the world and must always exist.
+    this.villages = []
+    const excludeZones = []
+    {
+      const portalX = findFlatSurface(worldData.surfaceHeights, 12, rng, excludeZones)
+      if (portalX >= 0) {
+        let portalY = Math.floor(worldData.surfaceHeights[portalX])
+        portalY = this.snapToGround(worldData.grid, portalX, portalY)
+        this.portalHenge = new PortalHenge(this, portalX, portalY, params)
+        excludeZones.push({ x: portalX, radius: 50 })
+      }
+    }
+
     // Place multiple villages with spacing.
     // First 2 on the primary surface; last 2 prefer cave/cliff floors so the
     // world's new verticality is inhabited. Fall back to surface if no cave found.
-    this.villages = []
-    const excludeZones = []
     for (let i = 0; i < VILLAGE_COUNT; i++) {
       let vx, vy
       if (i >= 2) {
@@ -153,13 +166,8 @@ export default class WorldScene extends Phaser.Scene {
       tablet._zone = zone
     }
 
-    // Place portal henge away from villages
-    const portalX = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
-    if (portalX >= 0) {
-      const portalY = Math.floor(worldData.surfaceHeights[portalX])
-      this.portalHenge = new PortalHenge(this, portalX, portalY, params)
-      excludeZones.push({ x: portalX, radius: 40 })
-    }
+    // Portal henge already placed at the top of buildWorld so it can't
+    // be starved by village placement.
 
     // Spawn god near the first village
     const homeVillage = this.villages[0]
@@ -806,8 +814,38 @@ export default class WorldScene extends Phaser.Scene {
       }
     }
 
-    // Portal henge: re-snap to ground so it doesn't float after digs
+    // Portal henge: re-snap to ground so it doesn't float after digs,
+    // and check for player interaction
     if (this.portalHenge?.updateGrounding) this.portalHenge.updateGrounding()
+    if (this.portalHenge?.updateInteraction) this.portalHenge.updateInteraction(time, this.god.sprite)
+
+    // Portal key handling: while the prompt is up, the player picks a
+    // direction. JustDown so a held key only fires once.
+    if (this._activePortal && this._portalKeys) {
+      const Phaser = window.Phaser || this.scene.systems.game.Phaser
+      const keyJustDown = (key) => {
+        if (!key) return false
+        // Phaser.Input.Keyboard.JustDown is the canonical helper; we
+        // import it from the existing imports at the top of the file.
+        return this.input.keyboard.checkDown(key, 0) && !key._wasDown
+      }
+      // Manual edge-trigger so we don't need to import JustDown again
+      for (const k of Object.values(this._portalKeys)) {
+        const down = k.isDown
+        if (down && !k._handledDown) {
+          k._handledDown = true
+          if (k === this._portalKeys.i && !this.params?.isRaid) {
+            this._beginPortalInbound(this._activePortal)
+          } else if (k === this._portalKeys.o && !this.params?.isRaid) {
+            this._beginPortalOutbound(this._activePortal)
+          } else if (k === this._portalKeys.r && this.params?.isRaid) {
+            this._beginPortalReturn(this._activePortal)
+          }
+        } else if (!down) {
+          k._handledDown = false
+        }
+      }
+    }
 
     // Biome flora: re-snap decoration sprites to current ground
     if (this.biomeFlora?.update) this.biomeFlora.update()
@@ -1102,6 +1140,227 @@ export default class WorldScene extends Phaser.Scene {
   damageEnemyGod(amount) {
     if (!this.enemyGod || !this.enemyGod.alive) return
     this.enemyGod.takeDamage(amount)
+  }
+
+  // ── Portal interaction ──────────────────────────────
+  // The PortalHenge class calls these scene hooks when the god
+  // approaches or leaves the henge. The prompt is a single floating
+  // text box centred on the screen with two key reminders.
+
+  _showPortalPrompt(portal) {
+    if (this._portalPromptUI) return
+    const ui = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60)
+      .setScrollFactor(0)
+      .setDepth(80)
+    const back = this.add.rectangle(0, 0, 360, 110, 0x05060e, 0.85)
+      .setStrokeStyle(2, 0x88aacc, 0.9)
+    const title = this.add.text(0, -36, 'Portal Henge', {
+      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#9affe6',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5)
+    const sub = this.params?.isRaid
+      ? '[ R ] Return home'
+      : '[ I ] Inbound  /  [ O ] Outbound'
+    const body = this.add.text(0, -8, sub, {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfd8e0',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5)
+    const hint = this.add.text(0, 22, this.params?.isRaid
+      ? 'The home stones call to you'
+      : 'Inbound: an enemy god strikes through. Outbound: you raid theirs.', {
+      fontFamily: 'Georgia, serif', fontSize: '10px', color: '#7a8a99',
+      stroke: '#000000', strokeThickness: 2,
+      wordWrap: { width: 320 },
+    }).setOrigin(0.5)
+    ui.add([back, title, body, hint])
+    this._portalPromptUI = ui
+    this._activePortal = portal
+
+    // Wire one-shot keys: I, O for home; R for raid
+    if (!this._portalKeys) {
+      this._portalKeys = {
+        i: this.input.keyboard.addKey('I'),
+        o: this.input.keyboard.addKey('O'),
+        r: this.input.keyboard.addKey('R'),
+      }
+    }
+  }
+
+  _hidePortalPrompt() {
+    if (this._portalPromptUI) {
+      this._portalPromptUI.destroy()
+      this._portalPromptUI = null
+    }
+    this._activePortal = null
+  }
+
+  // Inbound: a rival god materialises at the portal with an army of
+  // raid-tier combat units. The WarDirector hands the war to the player.
+  // Resolves when the rival god dies or the timer runs out (~120 s).
+  _beginPortalInbound(portal) {
+    this._hidePortalPrompt()
+    portal.state = 'ACTIVE_INBOUND'
+    if (this.addJuice) this.addJuice('severe')
+    if (this.showMessage) this.showMessage('A god strides through the portal!', 2200)
+    // Spawn an enemy chief at the portal location and a heavy raid wave
+    if (this.warDirector) {
+      this.warDirector.launchInvasion(18, this.villages[0])
+      // Place new enemies at the portal so they enter from the henge
+      const portalX = portal.worldX
+      const portalY = portal.worldY
+      let placed = 0
+      for (const u of this.warDirector.units) {
+        if (u.team === 'enemy' && placed < 18) {
+          u.sprite.x = portalX + (Math.random() - 0.5) * 80
+          u.sprite.y = portalY - 30
+          u.sprite.body?.setVelocity(0, 0)
+          placed++
+        }
+      }
+    }
+    // Auto-end the inbound after 90 s if it's not resolved by combat
+    this.time.delayedCall(90000, () => {
+      if (portal.state === 'ACTIVE_INBOUND') portal.endSortie()
+    })
+  }
+
+  // Outbound: travel to a freshly seeded raid world. The current world
+  // is snapshotted onto the scene so the return trip can restore the
+  // entire game state. Phase 7c builds the actual world swap.
+  _beginPortalOutbound(portal) {
+    this._hidePortalPrompt()
+    portal.state = 'ACTIVE_OUTBOUND'
+    if (this.addJuice) this.addJuice('epic')
+    this._planeWalkTransition(() => this._performWorldSwap('outbound', portal))
+  }
+
+  // Return: come back home from a raid. Restores the saved home world
+  // state and credits any god statues earned to the god's tablet count.
+  _beginPortalReturn(portal) {
+    this._hidePortalPrompt()
+    portal.state = 'ACTIVE_OUTBOUND'
+    if (this.addJuice) this.addJuice('epic')
+    this._planeWalkTransition(() => this._performWorldSwap('return', portal))
+  }
+
+  // Plane-walking transition. A black overlay sweeps in over ~1.4 s,
+  // the swap callback fires, and the overlay sweeps back out for a
+  // total of ~3.6 s. Sub-4-second budget per the brief.
+  _planeWalkTransition(midCallback) {
+    if (!this._planeOverlay) {
+      this._planeOverlay = this.add.rectangle(
+        GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT,
+        0x000000, 0,
+      ).setScrollFactor(0).setDepth(95)
+    }
+    const ov = this._planeOverlay
+    ov.alpha = 0
+    this.tweens.add({
+      targets: ov, alpha: 1, duration: 1400, ease: 'Quad.easeIn',
+      onComplete: () => {
+        try { midCallback?.() } catch (e) { console.error('plane walk callback failed', e) }
+        // Spawn rune motes for thematic flavour
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2
+          const m = this.add.circle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 3, 0x9affe6, 0.9)
+            .setScrollFactor(0).setDepth(96).setBlendMode(Phaser.BlendModes.ADD)
+          this.tweens.add({
+            targets: m,
+            x: GAME_WIDTH / 2 + Math.cos(a) * 220,
+            y: GAME_HEIGHT / 2 + Math.sin(a) * 140,
+            alpha: 0,
+            duration: 1200,
+            onComplete: () => m.destroy(),
+          })
+        }
+        this.tweens.add({
+          targets: ov, alpha: 0, duration: 1600, delay: 200, ease: 'Quad.easeOut',
+        })
+      },
+    })
+  }
+
+  // Snapshot + restore the world. For Phase 7a we just toggle the
+  // raidMode flag and bounce the god into a different home position;
+  // Phase 7c will replace this with a real world regeneration.
+  _performWorldSwap(direction, portal) {
+    if (direction === 'outbound') {
+      // Snapshot the home world state so we can restore it on return.
+      // We don't yet rebuild the terrain (Phase 7c). Instead, we mark
+      // the run as a raid: village team flips, tablets disappear from
+      // the inventory, and god statue collectibles spawn from villages.
+      this._homeSnapshot = {
+        godHp: this.god.hp,
+        godMana: this.god.mana,
+        godHighestTablet: this.god.highestTablet,
+        godStatuesEarned: 0,
+        savedTablets: this.tablets.map(t => ({ tileX: t.tileX, tileY: t.tileY, collected: !!t.collected })),
+      }
+      this.params.isRaid = true
+      // Flip every village to enemy team and reseed combat
+      for (const v of this.villages) v.team = 'enemy'
+      // Hide tablets (raid worlds yield god statues instead)
+      for (const t of this.tablets) t.sprite?.setVisible(false)
+      // Drop a god statue at each village so the player can earn them
+      this._spawnGodStatues()
+      if (this.showMessage) this.showMessage('You walk between worlds...', 2400)
+    } else if (direction === 'return') {
+      // Restore the home world view: villages back to home team, tablets
+      // back to their original visibility, raid flag cleared.
+      this.params.isRaid = false
+      for (const v of this.villages) v.team = 'home'
+      for (const t of this.tablets) t.sprite?.setVisible(true)
+      // Credit any god statues earned during the raid
+      const earned = this._homeSnapshot?.godStatuesEarned || 0
+      if (earned > 0) {
+        this.god.highestTablet = Math.min(10, this.god.highestTablet + earned)
+        if (this.showMessage) this.showMessage(`${earned} god statue${earned > 1 ? 's' : ''} carried home`, 2400)
+      }
+      // Clean up any lingering raid statues
+      this._destroyGodStatues()
+      this._homeSnapshot = null
+    }
+    portal.endSortie()
+  }
+
+  _spawnGodStatues() {
+    if (!this.villages?.length) return
+    if (!this._godStatues) this._godStatues = []
+    for (const v of this.villages) {
+      // One statue per village; pickup grants +1 to god statues earned.
+      const statue = this.add.rectangle(v.worldX, v.worldY - 16, 12, 18, 0xddc066, 0.95)
+        .setStrokeStyle(2, 0xfff0a0, 1)
+        .setDepth(8)
+      const glow = this.add.circle(v.worldX, v.worldY - 12, 18, 0xddc066, 0.25)
+        .setDepth(7).setBlendMode(Phaser.BlendModes.ADD)
+      this.tweens.add({
+        targets: glow, scale: 1.4, alpha: 0.05,
+        yoyo: true, repeat: -1, duration: 1500,
+      })
+      const zone = this.add.zone(v.worldX, v.worldY - 16, TILE_SIZE * 3, TILE_SIZE * 4)
+      this.physics.add.existing(zone, true)
+      const overlap = this.physics.add.overlap(this.god.sprite, zone, () => {
+        if (statue.active) {
+          statue.destroy()
+          glow.destroy()
+          zone.destroy()
+          if (this._homeSnapshot) this._homeSnapshot.godStatuesEarned += 1
+          if (this.showMessage) this.showMessage('A god statue claimed', 1400)
+          if (this.addJuice) this.addJuice('heavy')
+        }
+      })
+      this._godStatues.push({ statue, glow, zone, overlap })
+    }
+  }
+
+  _destroyGodStatues() {
+    if (!this._godStatues) return
+    for (const s of this._godStatues) {
+      s.statue?.destroy()
+      s.glow?.destroy()
+      s.zone?.destroy()
+    }
+    this._godStatues.length = 0
   }
 
   // Frame tick for fireballs spawned by the burst spell. Each fireball
