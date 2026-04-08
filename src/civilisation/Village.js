@@ -3,14 +3,45 @@ import { buildPalette, TILES } from '../world/TileTypes.js'
 import { WanderingWarrior } from './Warrior.js'
 import { findGroundTileY } from '../utils/Grounding.js'
 
-const POP_CAPS = [0, 10, 20, 35, 50, 70, 90, 120]
-const BASE_GROWTH_RATE = 0.3
+// Stages 0-10. Stage 0 is the caveman fallback when a village has no
+// active belief and no tablet support; stages 8-10 are unlocked by
+// god statues carried home from raided worlds. Per-village pop caps
+// scale up significantly so a full home world with 16 villages at
+// stage 7 supports 2500+ people and a max-stage raid world supports
+// over 4000.
+const POP_CAPS = [4, 25, 50, 80, 115, 150, 185, 220, 260, 300, 340]
+
+// Growth rate is multiplied by belief, stage, and fertility factors in
+// updatePopulation. Bumped up so populations actually reach their caps
+// within a reasonable play session; the base used to be 0.3 which made
+// stage 7 villages crawl.
+const BASE_GROWTH_RATE = 0.9
 const GROWTH_THRESHOLD = 20
 const DECLINE_THRESHOLD = 10
-const MAX_VISIBLE_VILLAGERS = 20
-const BUILDING_COUNTS = [0, 1, 3, 5, 8, 12, 16, 22]
-const STAGE_SPREAD = [0, 5, 8, 12, 16, 22, 28, 34]
-const STAGE_NAMES = ['', 'Cave dwellers', 'Fire-makers', 'Farmers', 'Small village', 'Large village', 'Town', 'Civilisation']
+
+// Visible villager budget per village. The hybrid pattern from Sky Baby:
+// all population is tracked as a number, but only a capped subset spawns
+// as simulated sprites. At ~50 visible per village * 16 villages = 800
+// simulated units at peak, comfortably under the 500-at-once ceiling
+// Sky Baby proved viable on commodity hardware.
+const MAX_VISIBLE_VILLAGERS = 50
+
+// Building counts and spread scale all the way through stage 10. Raid
+// tier villages sprawl into sprawling towns with temples, towers, and
+// walls across a ~60 tile radius.
+const BUILDING_COUNTS = [0, 1, 3, 5, 9, 14, 20, 28, 38, 50, 65]
+const STAGE_SPREAD     = [0, 4, 7, 11, 16, 22, 30, 40, 50, 60, 72]
+const STAGE_NAMES = [
+  'Caveman huddle', 'Cave dwellers', 'Fire-makers', 'Farmers',
+  'Small village', 'Large village', 'Town', 'Civilisation',
+  'Grand city', 'Imperium', 'Ascendant dominion',
+]
+
+// Population floor below which a village regresses to stage 0 if its
+// belief is also low. A village with a trickle of population is still
+// a village, but an abandoned one devolves into cavemen around a fire.
+const REGRESSION_POP_FLOOR = 3
+const REGRESSION_BELIEF_FLOOR = 8
 
 // Scale multiplier on procedural building textures.
 // Must be larger than the human-sized god (~20px tall) but smaller
@@ -183,7 +214,10 @@ export default class Village {
     this.tileY = tileY
     this.stage = 1
     this.belief = 50
-    this.population = 5
+    // Initial population big enough that a stage 1 village reads as
+    // "inhabited", not "one old man on a stool". POP_CAPS[1] is 25;
+    // starting at 10 gives the village plenty of room to visibly grow.
+    this.population = 10
     this.fertility = params.barrenFertile ?? 0.5
     this.name = generateVillageName(params)
     this.isReceiving = false
@@ -269,6 +303,7 @@ export default class Village {
 
   _pickBuildingType(rng) {
     const s = this.stage
+    if (s <= 0) return 'firepit'   // caveman huddle: just a fire and bodies
     if (s <= 1) return 'lean-to'
     if (s === 2) return rng() < 0.3 ? 'firepit' : 'hut'
     if (s === 3) return rng() < 0.15 ? 'firepit' : rng() < 0.6 ? 'hut' : 'house'
@@ -281,12 +316,37 @@ export default class Village {
       if (r < 0.5) return 'house'
       return 'longhouse'
     }
+    if (s === 7) {
+      const r = rng()
+      if (r < 0.04) return 'temple'
+      if (r < 0.12) return 'tower'
+      if (r < 0.2) return 'wall'
+      if (r < 0.55) return 'house'
+      return 'longhouse'
+    }
+    // Stages 8-10 unlock via god statues from raided worlds. Temples
+    // and towers become common; the silhouette reads as a proper city.
     const r = rng()
-    if (r < 0.04) return 'temple'
-    if (r < 0.12) return 'tower'
-    if (r < 0.2) return 'wall'
-    if (r < 0.55) return 'house'
-    return 'longhouse'
+    if (s === 8) {
+      if (r < 0.10) return 'temple'
+      if (r < 0.22) return 'tower'
+      if (r < 0.30) return 'wall'
+      if (r < 0.55) return 'longhouse'
+      return 'house'
+    }
+    if (s === 9) {
+      if (r < 0.15) return 'temple'
+      if (r < 0.30) return 'tower'
+      if (r < 0.40) return 'wall'
+      if (r < 0.62) return 'longhouse'
+      return 'house'
+    }
+    // Stage 10: ascendant dominion; temples dominate the skyline
+    if (r < 0.22) return 'temple'
+    if (r < 0.40) return 'tower'
+    if (r < 0.50) return 'wall'
+    if (r < 0.72) return 'longhouse'
+    return 'house'
   }
 
   _ensureBuildingTexture(type) {
@@ -389,10 +449,14 @@ export default class Village {
   // ── Tablet reception ────────────────────────────────
 
   // The tablet level this village needs to advance from its current
-  // stage. A stage 1 village needs the level 1 tablet, stage 2 needs
-  // level 2, and so on. Returns null once the village is maxed out.
+  // stage. Stages 1-7 are gated by home-world tablets; stages 8-10 are
+  // gated by god statues carried home from raided worlds. Stage 0 is
+  // the caveman fallback and needs a level 1 tablet like stage 1.
+  // Returns null once the village is fully ascendant.
   get nextRequiredTablet() {
-    return this.stage >= 7 ? null : this.stage
+    if (this.stage >= 10) return null
+    // Cavemen (stage 0) need the level 1 tablet to become dwellers
+    return Math.max(1, this.stage + 1 - (this.stage === 0 ? 1 : 0))
   }
 
   // Can the god's current tablet collection upgrade this village?
@@ -416,10 +480,10 @@ export default class Village {
   // first; this method just performs the upgrade and feedback.
   // Returns the new stage, or null if already maxed.
   receiveTablet() {
-    if (this.stage >= 7) return null
+    if (this.stage >= 10) return null
     this.stage += 1
     this.belief = Math.min(100, this.belief + 25)
-    this.population += 3
+    this.population += 5
     this.updateBeliefBar()
 
     // Flash stage name; normal label refreshes in updatePopulation
@@ -445,17 +509,33 @@ export default class Village {
   // ── Population dynamics ─────────────────────────────
 
   updatePopulation(delta) {
-    const cap = POP_CAPS[this.stage] || POP_CAPS[7]
+    const cap = POP_CAPS[this.stage] ?? POP_CAPS[POP_CAPS.length - 1]
     const dt = delta / 1000
     const prevPop = Math.floor(this.population)
 
     if (this.belief < DECLINE_THRESHOLD) {
-      this.population = Math.max(1, this.population - 0.2 * dt)
+      // Faster decline at higher stages; bigger cities have more mouths
+      // to feed and starve faster when belief collapses.
+      const declineRate = 0.3 + this.stage * 0.1
+      this.population = Math.max(0, this.population - declineRate * dt)
     } else if (this.belief > GROWTH_THRESHOLD && this.population < cap) {
       const beliefFactor = (this.belief - GROWTH_THRESHOLD) / (100 - GROWTH_THRESHOLD)
-      const stageMul = 0.5 + this.stage * 0.2
+      const stageMul = 0.5 + this.stage * 0.22
       const fertilityMul = 0.5 + this.fertility
       this.population = Math.min(cap, this.population + BASE_GROWTH_RATE * beliefFactor * stageMul * fertilityMul * dt)
+    }
+
+    // Caveman regression: an abandoned village whose faith has fully
+    // collapsed and whose numbers have dwindled reverts to a stage 0
+    // huddle. The buildings get rebuilt as a single fire pit and the
+    // pop floor resets; the land remembers the village name but the
+    // people have forgotten whatever gift the god once brought.
+    if (this.stage > 0 && this.belief <= REGRESSION_BELIEF_FLOOR &&
+        this.population < REGRESSION_POP_FLOOR) {
+      this.stage = 0
+      this.population = Math.max(this.population, 1)
+      this._buildSettlement()
+      this.label.setText(`${this.name}: ${STAGE_NAMES[0]}`)
     }
 
     if (Math.floor(this.population) !== prevPop) this._refreshLabel()

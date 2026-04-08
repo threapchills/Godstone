@@ -29,9 +29,9 @@ import MossLayer from '../world/MossLayer.js'
 // tablets to reach stage 7 on the home world without raiding. Raid
 // worlds override this behaviour separately (no tablets, god statues
 // from conquered villages instead).
-const VILLAGE_COUNT = 16      // was 4 at 600x300; proportional to width
+const VILLAGE_COUNT = 22      // was 4 at 600x300; scales with width + interior
 const TABLET_COUNT = 7        // one per home stage (1-7); raids yield 8-10
-const VILLAGE_SPACING = 90    // minimum tile distance between villages
+const VILLAGE_SPACING = 70    // minimum tile distance between villages
 const DAY_DURATION = 120000   // 2 minutes per full day/night cycle
 
 export default class WorldScene extends Phaser.Scene {
@@ -564,7 +564,7 @@ export default class WorldScene extends Phaser.Scene {
   // with breathing room between rebuilds.
   onVillageProximity(village) {
     if (!village || village.isReceiving) return
-    if (village.stage >= 7) return // already maxed
+    if (village.stage >= 10) return // fully ascendant; nothing left to give
 
     if (!village.canAccept(this.god.highestTablet)) {
       // Throttle the rejection hint per-village so it doesn't spam every frame
@@ -584,9 +584,13 @@ export default class WorldScene extends Phaser.Scene {
     // Lock village so overlaps during the sequence don't re-trigger
     village.isReceiving = true
 
-    // Determine how many stages we can advance in this single walk-in
+    // Determine how many stages we can advance in this single walk-in.
+    // Cap at 10 so god-statue stages (8-10) are reachable once Phase 7
+    // lands the raid loop; until then the god can still never climb
+    // past 7 on the home world because highestTablet won't exceed the
+    // available home tablets.
     const startStage = village.stage
-    const maxStage = Math.min(7, this.god.highestTablet + 1)
+    const maxStage = Math.min(10, this.god.highestTablet + 1)
     const upgrades = maxStage - startStage
     if (upgrades <= 0) {
       village.isReceiving = false
@@ -601,10 +605,12 @@ export default class WorldScene extends Phaser.Scene {
           if (this.ambience) this.ambience.playGong()
           this.showMessage(`${village.name} reaches stage ${newStage}.`, 900)
           // Stage advancement deserves a camera beat. Medium for
-          // ordinary upgrades, heavy for the jump to stage 7 (or 10
-          // once raid stages land). A proud village standing up gets
-          // the same punch as a midsized spell.
-          this.addJuice(newStage >= 7 ? 'heavy' : 'medium')
+          // ordinary upgrades, heavy for stage 7 (home cap), epic for
+          // stages 8-10 which can only be reached by carrying god
+          // statues back from a raid. A proud village standing up
+          // gets the same punch as a midsized spell.
+          const severity = newStage >= 8 ? 'epic' : newStage >= 7 ? 'heavy' : 'medium'
+          this.addJuice(severity)
         }
 
         // Final beat: unlock proximity, refresh enlightened count, hint
