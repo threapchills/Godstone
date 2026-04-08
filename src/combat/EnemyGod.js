@@ -137,7 +137,10 @@ export default class EnemyGod {
 
   _die() {
     this.alive = false
-    if (this.scene.addJuice) this.scene.addJuice('heavy')
+    // Epic juice: impact-frame freeze, punch-in zoom, extreme slowmo.
+    // Killing a rival god is the biggest moment in a home-world session;
+    // the camera should stop the world and show you the moment.
+    if (this.scene.addJuice) this.scene.addJuice('epic')
     if (this.scene.showMessage) this.scene.showMessage('A rival god falls', 2200)
     if (this.scene.ambience?.playGong) this.scene.ambience.playGong()
     if (this.sprite) {

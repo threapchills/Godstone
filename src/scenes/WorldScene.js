@@ -309,10 +309,20 @@ export default class WorldScene extends Phaser.Scene {
     this._lastStepSound = 0
     this._prevInLiquid = false
 
-    // Camera FX state
+    // Camera FX state. The scene owns one camera rig that all juice
+    // events push into: trauma-squared shake, lerped time dilation,
+    // lerped dynamic zoom, velocity look-ahead, and an impact-frame
+    // freeze for epic beats. Pattern lifted from Sky Baby's Camera
+    // class in SOAR/js/world.js and fitted onto Phaser's camera.
     this.trauma = 0
     this.timeDilation = 1.0
     this.targetTimeDilation = 1.0
+    this.camZoom = 1.0
+    this.camZoomTarget = 1.0
+    this._lookAheadX = 0
+    this._lookAheadY = 0
+    this._impactFrameTimer = 0 // ms of frozen-world drama after epic kills
+    this._dilationResetTimer = 0
 
     // Erosion timer: slow geological process
     this._lastErosionTime = 0
@@ -334,28 +344,70 @@ export default class WorldScene extends Phaser.Scene {
     return startY
   }
 
+  // During impact-frame freezes the game loop skips gameplay updates
+  // but the camera still needs to interpolate zoom, settle shake, and
+  // ease dilation so the freeze ends gracefully. This tick runs only
+  // the camera-side effects without touching any entity.
+  _tickCameraOnly(step) {
+    // Zoom lerp only
+    this.camZoom += (this.camZoomTarget - this.camZoom) * 3.0 * step
+    this.cameras.main.setZoom(this.camZoom)
+    // Trauma decay so an impact-frame shake still bleeds out
+    if (this.trauma > 0) this.trauma = Math.max(0, this.trauma - 0.9 * step)
+    if (this.trauma > 0) {
+      const cam = this.cameras.main
+      const shake = this.trauma * this.trauma
+      cam.scrollX += (Math.random() - 0.5) * shake * 28
+      cam.scrollY += (Math.random() - 0.5) * shake * 28
+    }
+  }
+
   addTrauma(amount) {
     this.trauma = Math.min(this.trauma + amount, 1.0)
   }
 
   triggerSlowmo(target = 0.2) {
-    this.timeDilation = target
+    this.targetTimeDilation = Math.max(0.05, Math.min(1.0, target))
+    this._dilationResetTimer = 0
+  }
+
+  // Dynamic zoom. Values around 1.0 keep the baseline frame; <1.0 zooms
+  // out to reveal more of the world (big spells, earthquakes); >1.0
+  // zooms in for focus (epic kills, tablet pickups).
+  setCameraZoom(target) {
+    this.camZoomTarget = Math.max(0.5, Math.min(1.6, target))
+  }
+
+  resetCameraFX() {
     this.targetTimeDilation = 1.0
+    this.camZoomTarget = 1.0
+    this._dilationResetTimer = 0
+  }
+
+  // Impact frame: a brief total freeze of entity updates so the player
+  // registers an epic moment viscerally. Rendering still happens; only
+  // the update loop is short-circuited inside update().
+  triggerImpactFrame(ms = 120) {
+    this._impactFrameTimer = ms
   }
 
   // Single entry point for camera juice. Severity presets keep call
   // sites legible and stop trauma values drifting toward "everything
-  // shakes maximum at all times".
+  // shakes maximum at all times". New "epic" preset adds a brief
+  // impact-frame freeze and a punch-in zoom for kills and stage unlocks.
   addJuice(severity) {
     const presets = {
-      light:  { trauma: 0.22, slowmo: 0.65 },
-      medium: { trauma: 0.45, slowmo: 0.45 },
-      heavy:  { trauma: 0.7,  slowmo: 0.3 },
-      severe: { trauma: 1.0,  slowmo: 0.15 },
+      light:  { trauma: 0.22, slowmo: 0.80, zoom: 1.00, impact: 0 },
+      medium: { trauma: 0.45, slowmo: 0.55, zoom: 0.95, impact: 0 },
+      heavy:  { trauma: 0.70, slowmo: 0.30, zoom: 0.80, impact: 0 },
+      severe: { trauma: 1.00, slowmo: 0.15, zoom: 0.70, impact: 0 },
+      epic:   { trauma: 0.90, slowmo: 0.10, zoom: 1.18, impact: 140 },
     }
     const p = presets[severity] || presets.light
     this.addTrauma(p.trauma)
     this.triggerSlowmo(p.slowmo)
+    this.setCameraZoom(p.zoom)
+    if (p.impact > 0) this.triggerImpactFrame(p.impact)
   }
 
   createHUD(params) {
@@ -548,6 +600,11 @@ export default class WorldScene extends Phaser.Scene {
         if (newStage != null) {
           if (this.ambience) this.ambience.playGong()
           this.showMessage(`${village.name} reaches stage ${newStage}.`, 900)
+          // Stage advancement deserves a camera beat. Medium for
+          // ordinary upgrades, heavy for the jump to stage 7 (or 10
+          // once raid stages land). A proud village standing up gets
+          // the same punch as a midsized spell.
+          this.addJuice(newStage >= 7 ? 'heavy' : 'medium')
         }
 
         // Final beat: unlock proximity, refresh enlightened count, hint
@@ -570,17 +627,51 @@ export default class WorldScene extends Phaser.Scene {
   update(time, delta) {
     if (!this.worldReady) return
 
-    // Screen Shake & Time Dilation
+    // Real-time step (never dilated). The camera rig always ticks in
+    // real time so shake, zoom, and dilation interpolation feel
+    // consistent regardless of game-world dilation.
     const step = delta / 1000
-    this.timeDilation += (this.targetTimeDilation - this.timeDilation) * 1.5 * step
-    
-    // Safety clamp in case of lag spikes
-    this.timeDilation = Math.max(0.1, Math.min(1.0, this.timeDilation))
-    this.physics.world.timeScale = 1.0 / this.timeDilation
+
+    // Impact frame: if a juice call requested a freeze, short-circuit
+    // every gameplay update for a handful of ms. The camera and zoom
+    // still tick underneath so the freeze reads as a punch, not a crash.
+    if (this._impactFrameTimer > 0) {
+      this._impactFrameTimer -= delta
+      // Still render at whatever the camera's current state shows
+      this._tickCameraOnly(step)
+      return
+    }
+
+    // Time dilation lerp: use real step so the blend speed is independent
+    // of the dilated delta the rest of the scene is using.
+    this.timeDilation += (this.targetTimeDilation - this.timeDilation) * 4.0 * step
+    this.timeDilation = Math.max(0.05, Math.min(1.0, this.timeDilation))
+    this.physics.world.timeScale = 1.0 / Math.max(0.05, this.timeDilation)
     const dilatedDelta = delta * this.timeDilation
 
+    // Zoom lerp
+    this.camZoom += (this.camZoomTarget - this.camZoom) * 3.0 * step
+    if (Math.abs(this.camZoom - 1.0) > 0.002 ||
+        Math.abs(this.cameras.main.zoom - this.camZoom) > 0.002) {
+      this.cameras.main.setZoom(this.camZoom)
+    }
+
+    // Trauma decays each real frame so the shake settles even during
+    // dilated time. Squared for exponential ease.
     if (this.trauma > 0) {
-      this.trauma = Math.max(0, this.trauma - 0.8 * step)
+      this.trauma = Math.max(0, this.trauma - 0.9 * step)
+    }
+
+    // Gradually release any active slowmo / zoom targets: 0.6 s after
+    // the last juice call, drift back to defaults. Earlier values used
+    // 0.8 s; shorter feels snappier with the new richer presets.
+    if (this.targetTimeDilation < 1.0 || this.camZoomTarget !== 1.0) {
+      this._dilationResetTimer += step
+      if (this._dilationResetTimer > 0.6) {
+        this.targetTimeDilation = 1.0
+        this.camZoomTarget = 1.0
+        this._dilationResetTimer = 0
+      }
     }
 
     // God movement
@@ -612,18 +703,31 @@ export default class WorldScene extends Phaser.Scene {
       }
     }
 
-    // Custom snappy camera follow
+    // Look-ahead: camera leads the god slightly in their direction of
+    // motion so fast traversal gets more warning of what's ahead. Lerped
+    // so direction reversals feel organic, not snappy.
+    const godVx = this.god.sprite.body?.velocity?.x || 0
+    const godVy = this.god.sprite.body?.velocity?.y || 0
+    this._lookAheadX += (godVx * 0.18 - this._lookAheadX) * 2.2 * step
+    this._lookAheadY += (godVy * 0.10 - this._lookAheadY) * 2.2 * step
+
+    // Custom snappy camera follow with zoom-aware centring. At zoom z
+    // the visible world width is GAME_WIDTH / z; top-left must account
+    // for that so the god stays centred when the camera punches in.
     const cam = this.cameras.main
-    const targetScrollX = this.god.sprite.x - GAME_WIDTH / 2
-    const targetScrollY = this.god.sprite.y - GAME_HEIGHT / 2 + 50
+    const viewW = GAME_WIDTH / Math.max(0.1, this.camZoom)
+    const viewH = GAME_HEIGHT / Math.max(0.1, this.camZoom)
+    const targetScrollX = this.god.sprite.x + this._lookAheadX - viewW / 2
+    const targetScrollY = this.god.sprite.y + this._lookAheadY - viewH / 2 + 50
     // Snappy interpolation
     cam.scrollX += (targetScrollX - cam.scrollX) * 0.4
     cam.scrollY += (targetScrollY - cam.scrollY) * 0.4
 
-    // Apply trauma shake visually
+    // Apply trauma shake visually. Trauma-squared gives the exponential
+    // feel of a Sky Baby / Vlambeer-style punch.
     if (this.trauma > 0) {
       const shake = this.trauma * this.trauma
-      const shakeScale = 25
+      const shakeScale = 28
       cam.scrollX += (Math.random() - 0.5) * shake * shakeScale
       cam.scrollY += (Math.random() - 0.5) * shake * shakeScale
     }
