@@ -8,6 +8,7 @@ import Village from '../civilisation/Village.js'
 import Bodyguard from '../civilisation/Bodyguard.js'
 import Tablet from '../civilisation/Tablet.js'
 import EnemyGod from '../combat/EnemyGod.js'
+import WarDirector from '../civilisation/WarDirector.js'
 import Minimap from '../ui/Minimap.js'
 import TabletInventory from '../ui/TabletInventory.js'
 import SpellBar from '../ui/SpellBar.js'
@@ -277,6 +278,10 @@ export default class WorldScene extends Phaser.Scene {
     // player. Far enough that the player has to travel to find it but
     // not so far it never appears on the minimap.
     this._spawnEnemyGod(worldData)
+
+    // War Director: drives the periodic raid wave cycle and dispatches
+    // home-village defenders during active raids. See WarDirector.js.
+    this.warDirector = new WarDirector(this)
 
     // Minimap
     this.minimap = new Minimap(this, this.worldGrid, params)
@@ -819,6 +824,9 @@ export default class WorldScene extends Phaser.Scene {
     // Enemy god roaming + AI
     if (this.enemyGod) this.enemyGod.update(dilatedDelta, this.god.sprite)
 
+    // War Director: raid cycle, combat unit ticking, arrow hit resolution
+    if (this.warDirector) this.warDirector.update(dilatedDelta)
+
     // Spells: tick cooldowns + refresh HUD
     if (this.spellBook) {
       this.spellBook.setUnlockCount(this.god.highestTablet)
@@ -1068,6 +1076,7 @@ export default class WorldScene extends Phaser.Scene {
     if (this.ambience) { this.ambience.destroy(); this.ambience = null }
     if (this.mossLayer) { this.mossLayer.destroy(); this.mossLayer = null }
     if (this.weather) { this.weather.shutdown(); this.weather = null }
+    if (this.warDirector) { this.warDirector.shutdown(); this.warDirector = null }
   }
 
   // ── Enemy spawn / update ─────────────────────────────

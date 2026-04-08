@@ -220,6 +220,9 @@ export default class Village {
     this.population = 10
     this.fertility = params.barrenFertile ?? 0.5
     this.name = generateVillageName(params)
+    // Team affiliation for combat. Every village on a home world
+    // starts 'home'; Phase 7 raid worlds mark them 'enemy'.
+    this.team = 'home'
     this.isReceiving = false
     this.params = params
 
