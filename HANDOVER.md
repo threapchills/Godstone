@@ -27,9 +27,7 @@ The rule this session is different from the usual "one step at a time": Mike sai
 - **Tablets vs god statues**: tablets drop on home world (stages 1-7). God statues drop from destroyed/conquered villages on raid worlds (stages 8-10). Functionally identical to tablets in the village progression pipeline, but only earned through raids.
 - **Undiggable tiles**: bedrock (already), magma rock, core lava. Deepest tablets sit just above this uncarvable floor so the exploration has proper vertical drama.
 
-### Status: all seven phases shipped
-
-The autonomous batch is complete. Live demo updates after the next deploy.
+### Status: phases 1-8 shipped
 
 | Phase | Status | Highlights |
 |---|---|---|
@@ -40,19 +38,25 @@ The autonomous batch is complete. Live demo updates after the next deploy.
 | 5. Combat import | Done | CombatUnit role AI, Arrow projectiles, WarDirector raid cycle |
 | 6. Spell system | Done | Element-aware burst spell wired to mana, four-slot bar |
 | 7. Portal omniverse | Done | Inbound prompt + invasion, outbound raid, god statues, plane walk |
+| 8. Polish + portal fix | Done | Sky variants, visceral combat, full outbound world generation |
 
-Each phase was committed as its own commit with a descriptive message ending in the Co-Authored-By line. Pushed to `origin main` in two batches (1-3 and 4-6) plus a final Phase 7 push.
+### Phase 8 details (session of 2026-04-09)
+
+- **Sky/asset randomisation.** 8 sky paintings + 2 tree variants loaded per world seed via `AssetVariants.js`. Each world picks 3 sky layers and a tree style from the variant pool so every world looks dramatically different. Blend values lowered so paintings' hues dominate.
+- **Speed/zoom tuning.** God speed 200 to 160, base camera zoom 1.0 to 1.15, `Scale.FIT` for consistent PC rendering.
+- **Minimap overhaul.** Portal henge shown as pulsing blue diamond. God dot changed to cyan (distinct from gold villages). Tablets rendered as glowing X markers with a subtle glow circle.
+- **Visceral combat.** Blood splatter particles on all damage sources (CombatUnit, EnemyGod, player God). Arrow whoosh procedural sound. Camera shake on player hits.
+- **Inbound portal fixed.** Enemy god no longer spawns by default; only materialises on inbound activation. Randomly generated via GodRenderer with random element pair each time. Portal blocks use during active invasion. Auto-resets to dormant when invader dies.
+- **Outbound portal: full world generation.** Home world frozen in memory (grid bytes, surface heights, village states, tablet states, god HP/mana/tablets). New enemy world generated with random seed and element pair. Enemy villages start at random stages 3-7 with pop 500-1000. Player's warriors spawn at the enemy portal henge. God statues earned by destroying every 3 enemy villages (tracked via population reaching 0). Return restores home world from snapshot and credits god statues as tablet levels.
 
 ### Known follow-ups for the next session
 
-These are the things I'd polish in a follow-up pass:
-
-- **Outbound raid worlds aren't yet a fresh terrain.** The current implementation flips village teams and swaps tablets for god statues on the existing world rather than regenerating a new seed. Phase 7c was scoped down to keep the batch shippable; the proper implementation needs a scene restart with `params.isRaid = true` and a new seed, with state restored on return.
 - **HUD scaling under camera zoom.** When the camera punches in (epic juice), HUD elements with `scrollFactor(0)` scale up too because zoom applies to the whole camera. Phaser fix is a dedicated UI camera; not worth the refactor unless it becomes annoying.
 - **Combat unit pathfinding** is steering-only. They jump over walls and small obstacles but don't pathfind through cave systems. Most battles happen on the surface so this rarely matters.
 - **Rain rate is tuned for visual presence**, not realism. Mike may want to dial it back once it's clearly cosmetically pleasant.
 - **Tablet inventory still shows 7 slots**. With stages 8-10 now reachable via god statues, the inventory could grow to 10 slots showing locked-until-raided icons for 8-10. Cosmetic upgrade.
-- **God statue collection doesn't yet kill the village** that drops it. The brief said "by taking over and destroying villages you receive God statues"; right now the statue spawns at every village in raid mode and the player just walks them up. Phase 7c proper would tie statue drops to actually defeating each village's defenders.
+- **Village destruction in raid worlds** is based on population reaching 0 via belief decay. Could be made more visceral by having direct spell/combat damage reduce village population faster.
+- **Enemy god on raid worlds** spawns at a random village but uses simple wander AI; could be made smarter with a "defend my villages" behaviour.
 
 ## Where we are (pre-mission state)
 
@@ -72,7 +76,7 @@ src/
     WorldGenerator.js   WorldRenderer.js   TileTypes.js
     GridSimulator.js    PortalHenge.js     Critters.js
     FoliageRenderer.js  ParticleEngine.js  MossLayer.js
-    BiomeFlora.js       ParallaxForeground.js   (inert; deletion candidate)
+    BiomeFlora.js       AssetVariants.js   WeatherSystem.js
   god/
     God.js              GodRenderer.js
   civilisation/
