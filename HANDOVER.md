@@ -27,36 +27,49 @@ The rule this session is different from the usual "one step at a time": Mike sai
 - **Tablets vs god statues**: tablets drop on home world (stages 1-7). God statues drop from destroyed/conquered villages on raid worlds (stages 8-10). Functionally identical to tablets in the village progression pipeline, but only earned through raids.
 - **Undiggable tiles**: bedrock (already), magma rock, core lava. Deepest tablets sit just above this uncarvable floor so the exploration has proper vertical drama.
 
-### Status: phases 1-8 shipped
+### Status: phases 1-8 shipped + session 8b fixes
 
 | Phase | Status | Highlights |
 |---|---|---|
 | 1. Foundations | Done | 1600x900 world, undiggable bedrock + magma, 7 tablets across depth bands |
 | 2. Water cycle | Done | Drifting clouds, rain drops, evaporation, humidity feedback loop |
 | 3. Camera AAA | Done | Trauma shake, lerped zoom + dilation, look-ahead, impact frames |
-| 4. Population sprawl | Done | 10 stages, 22 villages, caveman fallback, 1000+ pop hit verified |
+| 4. Population sprawl | Done | 20 stages, 22 villages, caveman fallback, 1400 pop cap at stage 20 |
 | 5. Combat import | Done | CombatUnit role AI, Arrow projectiles, WarDirector raid cycle |
-| 6. Spell system | Done | Element-aware burst spell wired to mana, four-slot bar |
-| 7. Portal omniverse | Done | Inbound prompt + invasion, outbound raid, god statues, plane walk |
-| 8. Polish + portal fix | Done | Sky variants, visceral combat, full outbound world generation |
+| 6. Spell system | Done | Element-aware burst spell, bolt = 100 dmg, four-slot bar |
+| 7. Portal omniverse | Done | Inbound + outbound via scene restart, god statues, plane walk |
+| 8. Polish | Done | Sky variants, visceral combat, scroll zoom, 20-stage progression |
 
-### Phase 8 details (session of 2026-04-09)
+### Session 8 details (2026-04-09)
 
-- **Sky/asset randomisation.** 8 sky paintings + 2 tree variants loaded per world seed via `AssetVariants.js`. Each world picks 3 sky layers and a tree style from the variant pool so every world looks dramatically different. Blend values lowered so paintings' hues dominate.
-- **Speed/zoom tuning.** God speed 200 to 160, base camera zoom 1.0 to 1.15, `Scale.FIT` for consistent PC rendering.
-- **Minimap overhaul.** Portal henge shown as pulsing blue diamond. God dot changed to cyan (distinct from gold villages). Tablets rendered as glowing X markers with a subtle glow circle.
-- **Visceral combat.** Blood splatter particles on all damage sources (CombatUnit, EnemyGod, player God). Arrow whoosh procedural sound. Camera shake on player hits.
-- **Inbound portal fixed.** Enemy god no longer spawns by default; only materialises on inbound activation. Randomly generated via GodRenderer with random element pair each time. Portal blocks use during active invasion. Auto-resets to dormant when invader dies.
-- **Outbound portal: full world generation.** Home world frozen in memory (grid bytes, surface heights, village states, tablet states, god HP/mana/tablets). New enemy world generated with random seed and element pair. Enemy villages start at random stages 3-7 with pop 500-1000. Player's warriors spawn at the enemy portal henge. God statues earned by destroying every 3 enemy villages (tracked via population reaching 0). Return restores home world from snapshot and credits god statues as tablet levels.
+**8a: Core features**
+- Sky/asset randomisation: 8 sky paintings per world seed via `AssetVariants.js`; blend values lowered so paintings dominate. Tree variants reverted (PNG transparency issues).
+- Speed/zoom: god speed 200→160, base zoom 1.0→1.15, `Scale.FIT` for PC.
+- Minimap: portal = pulsing blue diamond, god = cyan dot, tablets = glowing X.
+- Visceral combat: blood splatter on all damage, arrow whoosh sounds, camera shake on player hits.
+- Inbound portal: enemy god only on activation, randomly generated each time, portal blocks during invasion, resets when invader dies.
+- Outbound portal: full world generation via `scene.restart()`. Home world snapshot in module-level variable survives restarts.
+
+**8b: Fixes and expansion (same session)**
+- Portal freeze fix: replaced `requestAnimationFrame` in `create()` with `time.delayedCall(1)` so scene restarts work cleanly.
+- Tablets are count-based, not level-based. Messages say "needs 3 tablets" not "level 3 tablet".
+- Automatic raid waves disabled until first portal inbound. No more "war drums" during peaceful exploration.
+- Warrior pathfinding: surface-seeking AI escapes caves by flying upward; stuck detection after 1s triggers fly-escape.
+- Invasion scale: portal spawns 80 warriors (was 18); natural raids 30+12/stage.
+- Bolt spell = 100 damage. One-shots gods.
+- Defeating invading enemy god rewards a knowledge tablet.
+- Village stages expanded to 20. Pop caps 4→1400, building counts 0→220, stage names through "Megalopolis ascendant".
+- Scroll wheel zoom: 0.35x to 2.5x. Spells via 1/2/3 keys only. Minimap counter-scaled to stay fixed size.
 
 ### Known follow-ups for the next session
 
-- **HUD scaling under camera zoom.** When the camera punches in (epic juice), HUD elements with `scrollFactor(0)` scale up too because zoom applies to the whole camera. Phaser fix is a dedicated UI camera; not worth the refactor unless it becomes annoying.
-- **Combat unit pathfinding** is steering-only. They jump over walls and small obstacles but don't pathfind through cave systems. Most battles happen on the surface so this rarely matters.
-- **Rain rate is tuned for visual presence**, not realism. Mike may want to dial it back once it's clearly cosmetically pleasant.
-- **Tablet inventory still shows 7 slots**. With stages 8-10 now reachable via god statues, the inventory could grow to 10 slots showing locked-until-raided icons for 8-10. Cosmetic upgrade.
-- **Village destruction in raid worlds** is based on population reaching 0 via belief decay. Could be made more visceral by having direct spell/combat damage reduce village population faster.
-- **Enemy god on raid worlds** spawns at a random village but uses simple wander AI; could be made smarter with a "defend my villages" behaviour.
+- **HUD scaling under camera zoom.** HUD text elements still scale with zoom. A dedicated Phaser UI camera would fix this properly; the minimap is already counter-scaled but text labels are not.
+- **Tablet inventory widget** still shows 7 slots. Should expand dynamically to match total tablets collected, especially with 20 stages now reachable.
+- **Village destruction in raid worlds** relies on belief decay (slow). Direct spell/combat damage could reduce village population faster for more visceral raids.
+- **Enemy god on raid worlds** uses simple wander AI; could defend its villages more actively.
+- **Rain rate** tuned for visual presence; Mike may want to adjust.
+- **Combat still needs Sky Baby-level polish.** Mike's feedback: "play a long round of Sky Baby and see how robust the war and combat system feels there." The SOAR reference source is in the repo; key patterns to port: more aggressive raider AI, larger detection ranges, smarter village targeting, formation behaviour.
+- **Tree variant PNGs need proper transparency** before re-enabling. Current files have alpha ~208 at corners (opaque background visible).
 
 ## Where we are (pre-mission state)
 
