@@ -37,6 +37,11 @@ const TABLET_COUNT = 7        // one per home stage (1-7); raids yield 8-10
 const VILLAGE_SPACING = 70    // minimum tile distance between villages
 const DAY_DURATION = 120000   // 2 minutes per full day/night cycle
 
+// Module-level storage for the home world snapshot. Survives scene
+// restarts because it lives outside the scene instance. Cleared when
+// the player returns home.
+let _homeWorldSnapshot = null
+
 export default class WorldScene extends Phaser.Scene {
   constructor() {
     super({ key: 'World' })
@@ -44,6 +49,11 @@ export default class WorldScene extends Phaser.Scene {
 
   init(data) {
     this.params = data.params
+    // Carry over data for scene restarts (outbound/return transitions)
+    this._initGodState = data.godState || null
+    this._initWarriorCount = data.warriorCount || 0
+    this._initGodStatueInventory = data.godStatueInventory || 0
+    this._initRaidVillagesDestroyed = data.raidVillagesDestroyed || 0
   }
 
   create() {
@@ -54,21 +64,21 @@ export default class WorldScene extends Phaser.Scene {
     this.baseSkyColour = palette.skyColour
     this.cameras.main.setBackgroundColor(this.baseSkyColour)
 
-    // Show loading text while generating
+    // Show loading text while generating. World gen runs synchronously
+    // after a single-frame defer so the text has time to paint. Using
+    // this.time.delayedCall keeps everything inside Phaser's lifecycle
+    // so scene.restart() works cleanly (requestAnimationFrame breaks
+    // the update loop on restart because the callback outlives the
+    // old scene instance).
     const loadText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Shaping the world...', {
       fontFamily: 'Georgia, serif',
       fontSize: '20px',
       color: '#c07a28',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(100)
 
-    // Defer world gen to next animation frame so the loading text paints
-    // first. requestAnimationFrame is more reliable than scene.time here
-    // because the scene's clock can lag during startup under HMR, leaving
-    // the gen queue pending indefinitely. At 8x world size gen takes ~3s
-    // so a visible loading frame matters.
-    requestAnimationFrame(() => {
+    this.time.delayedCall(1, () => {
       this.buildWorld(params)
-      if (loadText && loadText.destroy) loadText.destroy()
+      if (loadText && loadText.active) loadText.destroy()
     })
   }
 
@@ -310,6 +320,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // World ready
     this.worldReady = true
+
+    // ── Post-build setup for raid worlds and scene restarts ──
+    this._applyPostBuildState()
 
     // Ambient sound engine; init requires user gesture so we defer
     // until the first keypress/click which will have already occurred
@@ -1284,7 +1297,7 @@ export default class WorldScene extends Phaser.Scene {
     this._hidePortalPrompt()
     portal.state = 'ACTIVE_OUTBOUND'
     if (this.addJuice) this.addJuice('epic')
-    this._planeWalkTransition(() => this._performWorldSwap('outbound', portal))
+    this._planeWalkTransition(() => this._performWorldSwap('outbound'))
   }
 
   // Return: come back home from a raid. Restores the saved home world
@@ -1293,7 +1306,7 @@ export default class WorldScene extends Phaser.Scene {
     this._hidePortalPrompt()
     portal.state = 'ACTIVE_OUTBOUND'
     if (this.addJuice) this.addJuice('epic')
-    this._planeWalkTransition(() => this._performWorldSwap('return', portal))
+    this._planeWalkTransition(() => this._performWorldSwap('return'))
   }
 
   // Plane-walking transition. A black overlay sweeps in over ~1.4 s,
@@ -1333,402 +1346,159 @@ export default class WorldScene extends Phaser.Scene {
     })
   }
 
-  // Full world swap. Outbound generates a genuinely new world; return
-  // restores the frozen home world. Two complete world states coexist
-  // in memory but only one is active at a time.
-  _performWorldSwap(direction, portal) {
+  // Full world swap via scene restart. Phaser cleanly tears down and
+  // rebuilds the scene, avoiding the frozen-update-loop bug that occurs
+  // when destroying core scene objects mid-tween-callback.
+  _performWorldSwap(direction) {
     if (direction === 'outbound') {
-      this._performOutbound(portal)
+      this._performOutbound()
     } else if (direction === 'return') {
-      this._performReturn(portal)
+      this._performReturn()
     }
   }
 
-  _performOutbound(portal) {
-    // ── Snapshot home world ──
-    // Freeze everything: grid, villages, tablets, god state, bodyguards.
-    // The home world sits inert in memory until the player returns.
-    this._homeSnapshot = {
-      grid: new Uint8Array(this.worldGrid.grid),
-      surfaceHeights: new Float64Array(this.worldGrid.surfaceHeights),
+  _performOutbound() {
+    // Snapshot home world into the module-level variable
+    _homeWorldSnapshot = {
       params: { ...this.params },
       godHp: this.god.hp,
       godMana: this.god.mana,
       godHighestTablet: this.god.highestTablet,
-      villageStates: this.villages.map(v => ({
-        tileX: v.tileX, tileY: v.tileY,
-        stage: v.stage, population: v.population, belief: v.belief,
-        team: v.team || 'home',
-      })),
-      tabletStates: this.tablets.map(t => ({
-        tileX: t.tileX, tileY: t.tileY, collected: !!t.collected,
-      })),
     }
 
-    // Count how many bodyguards/warriors the player has to bring along
-    const playerWarriorCount = this.bodyguards.length +
+    // Count warriors to bring along
+    const warriorCount = this.bodyguards.length +
       (this.warDirector?.units?.filter(u => u.team === 'home' && u.alive)?.length || 0)
 
-    // ── Tear down current world entities ──
-    this._teardownWorldEntities()
-
-    // ── Generate a fresh enemy world ──
+    // Build raid params
     const raidSeed = Math.floor(Math.random() * 999999)
     const pair = ELEMENT_PAIRS[raidSeed % ELEMENT_PAIRS.length]
-    const raidElement1 = pair[0]
-    const raidElement2 = pair[1]
     const raidParams = {
-      ...this.params,
       seed: raidSeed,
-      element1: raidElement1,
-      element2: raidElement2,
+      element1: pair[0],
+      element2: pair[1],
       elementRatio: 3 + (raidSeed % 5),
       skyCave: 0.3 + Math.random() * 0.4,
       barrenFertile: 0.4 + Math.random() * 0.3,
       sparseDense: 0.3 + Math.random() * 0.4,
       isRaid: true,
     }
-    this.params = raidParams
 
-    // Rebuild the world from scratch with the new seed
-    this._rebuildWorld(raidParams)
+    // Restart the scene with raid params; Phaser handles full teardown
+    this.scene.restart({
+      params: raidParams,
+      godState: {
+        hp: this.god.hp,
+        mana: this.god.mana,
+        highestTablet: this.god.highestTablet,
+      },
+      warriorCount: Math.max(6, warriorCount),
+    })
+  }
 
-    // ── Set up enemy villages: random stages 3-7, pop 500-1000 ──
-    for (const v of this.villages) {
-      v.team = 'enemy'
-      const advStage = 3 + Math.floor(Math.random() * 5) // 3-7
-      for (let s = v.stage; s < advStage; s++) v.receiveTablet()
-      v.population = 500 + Math.floor(Math.random() * 501)
-      v.belief = 60 + Math.random() * 30
+  _performReturn() {
+    if (!_homeWorldSnapshot) return
+
+    const snap = _homeWorldSnapshot
+    const godStatues = this._godStatueInventory || 0
+
+    // Restart scene with home params; snapshot is read in _applyPostBuildState
+    this.scene.restart({
+      params: { ...snap.params, isRaid: false },
+      godState: {
+        hp: snap.godHp,
+        mana: snap.godMana,
+        highestTablet: snap.godHighestTablet + godStatues,
+      },
+      godStatueInventory: godStatues,
+    })
+  }
+
+  // Called after buildWorld finishes. Configures raid-world villages,
+  // spawns warriors, restores god state from scene restart data.
+  _applyPostBuildState() {
+    const godState = this._initGodState
+    if (godState) {
+      this.god.hp = godState.hp
+      this.god.mana = godState.mana
+      this.god.highestTablet = godState.highestTablet
+      this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
     }
 
-    // Spawn a random enemy god in the enemy world
-    const enemySeed = Math.floor(Math.random() * 999999)
-    const enemySpawnVillage = this.villages[Math.floor(Math.random() * this.villages.length)]
-    if (enemySpawnVillage) {
-      this.enemyGod = new EnemyGod(
-        this,
-        enemySpawnVillage.worldX,
-        enemySpawnVillage.worldY - 30,
-        enemySeed
-      )
-      this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
-    }
+    if (this.params?.isRaid) {
+      // ── Raid world setup ──
+      // Advance enemy villages to random stages with high population
+      for (const v of this.villages) {
+        v.team = 'enemy'
+        const advStage = 3 + Math.floor(Math.random() * 5)
+        for (let s = v.stage; s < advStage; s++) v.receiveTablet()
+        v.population = 500 + Math.floor(Math.random() * 501)
+        v.belief = 60 + Math.random() * 30
+      }
 
-    // ── Spawn god at the portal henge of the enemy world ──
-    if (this.portalHenge) {
-      this.god.sprite.x = this.portalHenge.worldX
-      this.god.sprite.y = this.portalHenge.worldY - TILE_SIZE * 3
-      this.god.sprite.body.setVelocity(0, 0)
-    }
+      // Spawn enemy god at a random village
+      const enemySeed = Math.floor(Math.random() * 999999)
+      const spawnVillage = this.villages[Math.floor(Math.random() * this.villages.length)]
+      if (spawnVillage) {
+        this.enemyGod = new EnemyGod(this, spawnVillage.worldX, spawnVillage.worldY - 30, enemySeed)
+        this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
+      }
 
-    // ── Spawn the player's warriors at the portal ──
-    const warriorsToSpawn = Math.max(6, playerWarriorCount)
-    if (this.warDirector && this.portalHenge) {
-      const px = this.portalHenge.worldX
-      const py = this.portalHenge.worldY
-      for (let i = 0; i < warriorsToSpawn; i++) {
-        const ox = px + (Math.random() - 0.5) * 120
-        const oy = py - 20 - Math.random() * 20
-        const stage = Math.min(7, Math.max(3, this.god.highestTablet))
-        const clothing = 0x66ddaa
-        const unit = new CombatUnit(this, ox, oy, stage, 'home', null, clothing)
-        unit.role = 'raider'
-        this.warDirector.units.push(unit)
-        if (this.worldLayer && !unit._hasCollider) {
-          unit._hasCollider = true
-          this.physics.add.collider(unit.sprite, this.worldLayer)
+      // Place god at the portal henge (entry point)
+      if (this.portalHenge) {
+        this.god.sprite.x = this.portalHenge.worldX
+        this.god.sprite.y = this.portalHenge.worldY - TILE_SIZE * 3
+        this.god.sprite.body.setVelocity(0, 0)
+      }
+
+      // Spawn the player's warriors at the portal
+      const count = this._initWarriorCount || 6
+      if (this.warDirector && this.portalHenge) {
+        const px = this.portalHenge.worldX
+        const py = this.portalHenge.worldY
+        for (let i = 0; i < count; i++) {
+          const ox = px + (Math.random() - 0.5) * 120
+          const oy = py - 20 - Math.random() * 20
+          const stage = Math.min(7, Math.max(3, this.god.highestTablet))
+          const unit = new CombatUnit(this, ox, oy, stage, 'home', null, 0x66ddaa)
+          unit.role = 'raider'
+          this.warDirector.units.push(unit)
+          if (this.worldLayer && !unit._hasCollider) {
+            unit._hasCollider = true
+            this.physics.add.collider(unit.sprite, this.worldLayer)
+          }
         }
       }
-    }
 
-    // ── God statues from destroying villages ──
-    // In raid worlds, destroying any 3 enemy villages yields god statues.
-    // We track village destruction count and award statues accordingly.
-    this._raidVillagesDestroyed = 0
-    this._godStatueInventory = 0
+      // Tracking for god statue progression
+      this._raidVillagesDestroyed = this._initRaidVillagesDestroyed || 0
+      this._godStatueInventory = this._initGodStatueInventory || 0
 
-    this.showMessage('You walk between worlds...', 2400)
-    if (this.ambience?.playMagic) this.ambience.playMagic()
-  }
-
-  _performReturn(portal) {
-    if (!this._homeSnapshot) {
-      this.showMessage('No home world to return to!', 2000)
-      return
-    }
-
-    // Credit god statues earned during the raid
-    const earned = this._godStatueInventory || 0
-
-    // ── Tear down raid world ──
-    this._teardownWorldEntities()
-
-    // ── Restore home world ──
-    const snap = this._homeSnapshot
-    this.params = { ...snap.params, isRaid: false }
-
-    // Restore the grid
-    this.worldGrid.grid.set(snap.grid)
-    this.worldGrid.surfaceHeights.set(snap.surfaceHeights)
-
-    // Rebuild tilemap and collision from restored grid
-    this._rebuildWorld(this.params, true) // skipGenerate: use existing grid
-
-    // Restore village states
-    for (let i = 0; i < this.villages.length && i < snap.villageStates.length; i++) {
-      const sv = snap.villageStates[i]
-      this.villages[i].team = sv.team
-      // Village stage and population were frozen; restore them
-      while (this.villages[i].stage < sv.stage) this.villages[i].receiveTablet()
-      this.villages[i].population = sv.population
-      this.villages[i].belief = sv.belief
-    }
-
-    // Restore god
-    this.god.hp = snap.godHp
-    this.god.mana = snap.godMana
-    this.god.highestTablet = snap.godHighestTablet
-
-    // Credit earned god statues as tablet levels
-    if (earned > 0) {
-      this.god.highestTablet = Math.min(10, this.god.highestTablet + earned)
-      this.showMessage(`${earned} god statue${earned > 1 ? 's' : ''} carried home!`, 2800)
-    } else {
-      this.showMessage('You return to your world.', 2200)
-    }
-    this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
-
-    // Place god at home portal
-    if (this.portalHenge) {
-      this.god.sprite.x = this.portalHenge.worldX
-      this.god.sprite.y = this.portalHenge.worldY - TILE_SIZE * 3
-      this.god.sprite.body.setVelocity(0, 0)
-    }
-
-    this.enemyGod = null
-    this._homeSnapshot = null
-    this._raidVillagesDestroyed = 0
-    this._godStatueInventory = 0
-
-    if (this.ambience?.playGong) this.ambience.playGong()
-    portal.endSortie()
-  }
-
-  // Tear down all dynamic entities so the world can be rebuilt
-  _teardownWorldEntities() {
-    // Destroy enemy god
-    if (this.enemyGod) { this.enemyGod.destroy(); this.enemyGod = null }
-    // Destroy bodyguards
-    for (const bg of this.bodyguards) bg.destroy()
-    this.bodyguards = []
-    // Destroy war director units
-    if (this.warDirector) this.warDirector.shutdown()
-    // Destroy god statues
-    this._destroyGodStatues()
-    // Destroy villages (they don't have a top-level destroy; clean up their children)
-    for (const v of this.villages) {
-      if (v.buildings) v.buildings.forEach(b => b?.destroy())
-      if (v.villagerSprites) v.villagerSprites.forEach(s => s?.destroy())
-      v.label?.destroy()
-      v._zone?.destroy()
-      v.gateSprite?.destroy()
-    }
-    this.villages = []
-    // Destroy tablets
-    for (const t of this.tablets) {
-      t.sprite?.destroy()
-      t._zone?.destroy()
-      if (t._orbMotes) t._orbMotes.forEach(m => m?.destroy())
-      if (t._shimmer) t._shimmer.destroy?.()
-    }
-    this.tablets = []
-    // Destroy minimap
-    if (this.minimap) {
-      this.minimap.container?.destroy()
-      this.minimap.ring?.destroy()
-      this.minimap.core?.destroy()
-      this.minimap.godDot?.destroy()
-      this.minimap.godTick?.destroy()
-    }
-    // Destroy portal henge
-    if (this.portalHenge) {
-      this.portalHenge.sprite?.destroy()
-      this.portalHenge.label?.destroy()
-      this.portalHenge.glow?.destroy()
-      this.portalHenge = null
-    }
-    // Destroy parallax sky
-    if (this.parallaxSky) { this.parallaxSky.destroy(); this.parallaxSky = null }
-    // Destroy foliage
-    if (this.foliageRenderer?.trees) {
-      for (const t of this.foliageRenderer.trees) t.sprite?.destroy()
-      this.foliageRenderer.trees = []
-    }
-    // Destroy biome flora, particles, critters, moss, weather
-    if (this.biomeFlora?.destroy) this.biomeFlora.destroy()
-    if (this.particles?.destroy) { this.particles.destroy(); this.particles = null }
-    if (this.critters?.destroy) this.critters.destroy()
-    if (this.mossLayer?.destroy) { this.mossLayer.destroy(); this.mossLayer = null }
-    if (this.weather?.shutdown) { this.weather.shutdown(); this.weather = null }
-    // Destroy tilemap
-    if (this.worldMap) { this.worldMap.destroy(); this.worldMap = null }
-  }
-
-  // Rebuild the world: generates terrain (or reuses existing grid if
-  // skipGenerate is true), re-creates the tilemap, places entities.
-  _rebuildWorld(params, skipGenerate = false) {
-    // Uses top-level imports: generateWorld, findFlatSurface, findCaveSurface,
-    // findTabletLocation, createTilesetTexture, createTilemap, setupCollision,
-    // WRAP_PAD, buildPalette — all already imported at the top of this file.
-    const palette = buildPalette(params)
-
-    let worldData
-    if (skipGenerate) {
-      // Reuse the existing grid stored in this.worldGrid
-      worldData = {
-        grid: this.worldGrid.grid,
-        surfaceHeights: this.worldGrid.surfaceHeights,
-        biomeMap: null,
-        biomeVocab: null,
-      }
-    } else {
-      worldData = generateWorld(params)
-      this.worldGrid.grid = worldData.grid
-      this.worldGrid.surfaceHeights = worldData.surfaceHeights
-    }
-
-    // Tilemap
-    createTilesetTexture(this, params)
-    const { map, layer } = createTilemap(this, worldData)
-    setupCollision(layer)
-    this.worldMap = map
-    this.worldLayer = layer
-
-    // Reattach god physics to new layer
-    if (this.god?.sprite) {
-      this.physics.add.collider(this.god.sprite, layer)
-    }
-
-    // Physics world bounds
-    this.physics.world.setBounds(
-      -WRAP_PAD * TILE_SIZE, 0,
-      (WORLD_WIDTH + 2 * WRAP_PAD) * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE
-    )
-
-    // Average surface for depth overlay
-    let surfaceSum = 0
-    for (let i = 0; i < worldData.surfaceHeights.length; i++) surfaceSum += worldData.surfaceHeights[i]
-    this.surfaceRowY = surfaceSum / worldData.surfaceHeights.length
-
-    // Seeded RNG
-    let placementSeed = params.seed + 11111
-    const rng = () => {
-      placementSeed |= 0
-      placementSeed = (placementSeed + 0x6d2b79f5) | 0
-      let t = Math.imul(placementSeed ^ (placementSeed >>> 15), 1 | placementSeed)
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-    }
-
-    // Portal henge
-    const excludeZones = []
-    const portalX = findFlatSurface(worldData.surfaceHeights, 12, rng, excludeZones)
-    if (portalX >= 0) {
-      let portalY = Math.floor(worldData.surfaceHeights[portalX])
-      portalY = this.snapToGround(worldData.grid, portalX, portalY)
-      this.portalHenge = new PortalHenge(this, portalX, portalY, params)
-      excludeZones.push({ x: portalX, radius: 50 })
-    }
-
-    // Villages
-    this.villages = []
-    for (let i = 0; i < VILLAGE_COUNT; i++) {
-      let vx, vy
-      if (i >= 2) {
-        const cavePos = findCaveSurface(worldData.grid, worldData.surfaceHeights, 8, rng, excludeZones)
-        if (cavePos) { vx = cavePos.x; vy = cavePos.y }
-        else {
-          vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
-          if (vx < 0) continue
-          vy = Math.floor(worldData.surfaceHeights[vx])
-        }
+      this.showMessage('You walk between worlds...', 2400)
+    } else if (_homeWorldSnapshot && godState) {
+      // ── Returning home ──
+      const earned = this._initGodStatueInventory || 0
+      if (earned > 0) {
+        this.showMessage(`${earned} god statue${earned > 1 ? 's' : ''} carried home!`, 2800)
       } else {
-        vx = findFlatSurface(worldData.surfaceHeights, 8, rng, excludeZones)
-        if (vx < 0) continue
-        vy = Math.floor(worldData.surfaceHeights[vx])
+        this.showMessage('You return to your world.', 2200)
       }
-      vy = this.snapToGround(worldData.grid, vx, vy)
-      const village = new Village(this, vx, vy, params)
-      this.villages.push(village)
-      excludeZones.push({ x: vx, radius: VILLAGE_SPACING })
-    }
 
-    // Village delivery zones
-    this.villages.forEach(village => {
-      const zone = this.add.zone(village.worldX, village.worldY - TILE_SIZE, TILE_SIZE * 8, TILE_SIZE * 5)
-      this.physics.add.existing(zone, true)
-      if (this.god?.sprite) {
-        this.physics.add.overlap(this.god.sprite, zone, () => this.onVillageProximity(village))
+      // Place god at the portal
+      if (this.portalHenge) {
+        this.god.sprite.x = this.portalHenge.worldX
+        this.god.sprite.y = this.portalHenge.worldY - TILE_SIZE * 3
+        this.god.sprite.body.setVelocity(0, 0)
       }
-      village._zone = zone
-    })
 
-    // Tablets (only on home worlds)
-    this.tablets = []
-    if (!params.isRaid) {
-      for (let i = 0; i < TABLET_COUNT; i++) {
-        const depthFrac = 0.2 + (i / Math.max(1, TABLET_COUNT - 1)) * 0.75
-        const pos = findTabletLocation(worldData.grid, worldData.surfaceHeights, rng, depthFrac)
-        const tablet = new Tablet(this, pos.x, pos.y)
-        this.tablets.push(tablet)
-        const zone = this.add.zone(tablet.worldX, tablet.worldY, TILE_SIZE * 3, TILE_SIZE * 3)
-        this.physics.add.existing(zone, true)
-        if (this.god?.sprite) {
-          this.physics.add.overlap(this.god.sprite, zone, () => this.onTabletPickup(tablet))
-        }
-        tablet._zone = zone
-      }
+      _homeWorldSnapshot = null
     }
-
-    // Parallax sky
-    const variants = pickVariants(params.seed || 0)
-    this.variants = variants
-    this.parallaxSky = new ParallaxSky(this, params, palette)
-
-    // Critters, flora, particles, foliage, moss, weather
-    this.critters = new CritterManager(this, this.worldGrid, worldData.surfaceHeights, params)
-    if (worldData.biomeMap) {
-      this.biomeFlora = new BiomeFlora(this, this.worldGrid, worldData.surfaceHeights, worldData.biomeMap, worldData.biomeVocab, params)
-    }
-    this.particles = new ParticleEngine(this, params, this.worldGrid, worldData.surfaceHeights)
-    this.gridSimulator = new GridSimulator(this, this.worldGrid)
-    this.weather = new WeatherSystem(this, this.worldGrid, params)
-    this.foliageRenderer = new FoliageRenderer(this, this.worldGrid, palette, variants.treeKey)
-    this.mossLayer = new MossLayer(this, this.worldGrid, params, worldData.surfaceHeights)
-
-    // War Director
-    this.warDirector = new WarDirector(this)
-
-    // Minimap
-    this.minimap = new Minimap(this, this.worldGrid, params)
-    this.villages.forEach(v => this.minimap.addVillageMarker(v))
-    this.tablets.forEach(t => {
-      const dot = this.minimap.addTabletMarker(t)
-      if (dot) t._minimapDot = dot
-    })
-    if (this.portalHenge) this.minimap.addPortalMarker(this.portalHenge)
-
-    // Ambience
-    if (this.ambience?.initialized) this.ambience.setWorld(params)
   }
 
   // God statues: in raid worlds, destroying 3 villages yields one.
-  // This is checked by the village destruction handler.
   _onEnemyVillageDestroyed(village) {
     if (!this.params?.isRaid) return
     this._raidVillagesDestroyed = (this._raidVillagesDestroyed || 0) + 1
-    // Every 3 destroyed villages earns a god statue
     if (this._raidVillagesDestroyed % 3 === 0) {
       this._godStatueInventory = (this._godStatueInventory || 0) + 1
       this.showMessage(`God statue earned! (${this._godStatueInventory} total)`, 2200)
@@ -1739,20 +1509,6 @@ export default class WorldScene extends Phaser.Scene {
       this.showMessage(`Enemy village falls. ${remaining} more for a god statue.`, 1800)
       this.addJuice('heavy')
     }
-  }
-
-  _spawnGodStatues() {
-    // Legacy method; god statues are now earned via village destruction
-  }
-
-  _destroyGodStatues() {
-    if (!this._godStatues) return
-    for (const s of this._godStatues) {
-      s.statue?.destroy()
-      s.glow?.destroy()
-      s.zone?.destroy()
-    }
-    this._godStatues = []
   }
 
   // Frame tick for fireballs spawned by the burst spell. Each fireball
