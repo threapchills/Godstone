@@ -278,6 +278,14 @@ export default class WorldScene extends Phaser.Scene {
     // Moss layer: a slowly spreading green film on surface tiles.
     this.mossLayer = new MossLayer(this, this.worldGrid, params, worldData.surfaceHeights)
 
+    // HUD container: counter-scales against camera zoom so all UI
+    // elements stay at fixed screen positions regardless of zoom level.
+    // Children keep their normal screen-space coordinates; the container
+    // transform cancels out the camera's zoom pivot.
+    this.hudContainer = this.add.container(0, 0)
+      .setScrollFactor(0)
+      .setDepth(55)
+
     // HUD
     this.createHUD(params)
 
@@ -295,6 +303,11 @@ export default class WorldScene extends Phaser.Scene {
     this.spellBook = new SpellBook(params)
     this.spellBar = new SpellBar(this)
     this._wireSpellInput()
+
+    // Move SpellBar and TabletInventory game objects into the HUD
+    // container so they get automatic zoom compensation.
+    for (const obj of this.spellBar.getAllObjects()) this.hudContainer.add(obj)
+    for (const obj of this.tabletInventory.getAllObjects()) this.hudContainer.add(obj)
 
     // Enemy god is NOT present by default. It only appears when the
     // player activates inbound mode on the portal, or when an enemy
@@ -444,15 +457,16 @@ export default class WorldScene extends Phaser.Scene {
 
   createHUD(params) {
     const pad = 12
+    const c = this.hudContainer
 
     // Element display
-    this.add.text(pad, pad, `${params.element1} + ${params.element2}`, {
+    c.add(this.add.text(pad, pad, `${params.element1} + ${params.element2}`, {
       fontFamily: 'Georgia, serif',
       fontSize: '14px',
       color: '#c07a28',
       stroke: '#000000',
       strokeThickness: 2,
-    }).setScrollFactor(0).setDepth(50)
+    }).setScrollFactor(0).setDepth(50))
 
     // Tablet counter (small text). Detailed inventory lives in
     // TabletInventory; this line just shows total carry weight.
@@ -463,6 +477,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 2,
     }).setScrollFactor(0).setDepth(50)
+    c.add(this.tabletHUD)
 
     // Village count
     this.villageHUD = this.add.text(pad, pad + 36, `Villages: ${this.villages.length}`, {
@@ -472,6 +487,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 2,
     }).setScrollFactor(0).setDepth(50)
+    c.add(this.villageHUD)
 
     // Day/night indicator
     this.dayNightHUD = this.add.text(pad, pad + 52, '', {
@@ -481,6 +497,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 1,
     }).setScrollFactor(0).setDepth(50)
+    c.add(this.dayNightHUD)
 
     // God HP gauge: simple text + horizontal bar above the HUD column
     this.hpHUD = this.add.text(pad, pad + 68, 'HP: 100', {
@@ -490,10 +507,13 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 2,
     }).setScrollFactor(0).setDepth(50)
+    c.add(this.hpHUD)
     this.hpBarBack = this.add.rectangle(pad, pad + 84, 80, 4, 0x222222, 0.85)
       .setOrigin(0, 0).setScrollFactor(0).setDepth(50)
+    c.add(this.hpBarBack)
     this.hpBarFill = this.add.rectangle(pad, pad + 84, 80, 4, 0xaa3333, 1)
       .setOrigin(0, 0).setScrollFactor(0).setDepth(51)
+    c.add(this.hpBarFill)
 
     // Hint text
     this.hintText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 30,
@@ -502,6 +522,7 @@ export default class WorldScene extends Phaser.Scene {
       fontSize: '12px',
       color: '#666666',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(50)
+    c.add(this.hintText)
 
     this.time.delayedCall(10000, () => {
       this.tweens.add({ targets: this.hintText, alpha: 0, duration: 2000 })
@@ -515,6 +536,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(60).setAlpha(0)
+    c.add(this.messageText)
 
     // Coordinates
     this.coordText = this.add.text(GAME_WIDTH - pad, pad, '', {
@@ -524,6 +546,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 1,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
+    c.add(this.coordText)
 
     // Depth gauge
     this.depthText = this.add.text(GAME_WIDTH - pad, pad + 14, '', {
@@ -533,6 +556,7 @@ export default class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 1,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
+    c.add(this.depthText)
   }
 
   showMessage(text, duration = 3000) {
@@ -750,14 +774,12 @@ export default class WorldScene extends Phaser.Scene {
     this._lookAheadX += (godVx * 0.18 - this._lookAheadX) * 2.2 * step
     this._lookAheadY += (godVy * 0.10 - this._lookAheadY) * 2.2 * step
 
-    // Custom snappy camera follow with zoom-aware centring. At zoom z
-    // the visible world width is GAME_WIDTH / z; top-left must account
-    // for that so the god stays centred when the camera punches in.
+    // Camera follow: Phaser 3 applies zoom around the viewport centre
+    // independently of scroll, so scroll is always godPos - half-viewport
+    // regardless of zoom level.
     const cam = this.cameras.main
-    const viewW = GAME_WIDTH / Math.max(0.1, this.camZoom)
-    const viewH = GAME_HEIGHT / Math.max(0.1, this.camZoom)
-    const targetScrollX = this.god.sprite.x + this._lookAheadX - viewW / 2
-    const targetScrollY = this.god.sprite.y + this._lookAheadY - viewH / 2 + 50
+    const targetScrollX = this.god.sprite.x + this._lookAheadX - GAME_WIDTH / 2
+    const targetScrollY = this.god.sprite.y + this._lookAheadY - GAME_HEIGHT / 2 + 50
     // Snappy interpolation
     cam.scrollX += (targetScrollX - cam.scrollX) * 0.4
     cam.scrollY += (targetScrollY - cam.scrollY) * 0.4
@@ -771,6 +793,15 @@ export default class WorldScene extends Phaser.Scene {
       cam.scrollY += (Math.random() - 0.5) * shake * shakeScale
     }
 
+    // HUD zoom compensation: the container counter-scales against camera
+    // zoom so every child stays at its intended screen position and size.
+    const invZoom = 1 / (cam.zoom || 1)
+    const midX = GAME_WIDTH / 2
+    const midY = GAME_HEIGHT / 2
+    this.hudContainer.setScale(invZoom)
+    this.hudContainer.x = midX * (1 - invZoom)
+    this.hudContainer.y = midY * (1 - invZoom)
+
     // Kill plane
     if (this.god.sprite.y > WORLD_HEIGHT * TILE_SIZE) {
       this.respawnGod()
@@ -780,12 +811,21 @@ export default class WorldScene extends Phaser.Scene {
     this.dayTime = (time % DAY_DURATION) / DAY_DURATION
     const nightIntensity = Math.max(0, Math.sin(this.dayTime * Math.PI * 2 - Math.PI / 2)) * 0.4
     this.dayNightOverlay.setAlpha(nightIntensity)
+    this.dayNightOverlay.setScale(invZoom)
+
+    // Full-screen overlays created lazily also need zoom compensation
+    if (this._deathFlash) this._deathFlash.setScale(invZoom)
+    if (this._planeOverlay) this._planeOverlay.setScale(invZoom)
 
     // Depth feedback overlay. Compares camera midline against the world's
     // average surface y; at surface the overlay is invisible, at the edge
     // of the molten core it sits around 0.65 alpha with a vertical gradient
     // so the bottom of the screen always reads slightly darker than the top.
     if (this.depthOverlay) {
+      this.depthOverlay.setScale(invZoom)
+      this.depthOverlay.x = midX * (1 - invZoom)
+      this.depthOverlay.y = midY * (1 - invZoom)
+
       const surfacePx = (this.surfaceRowY || 40) * TILE_SIZE
       const coreTopPx = (WORLD_HEIGHT - TERRAIN.BEDROCK_DEPTH - TERRAIN.CORE_DEPTH) * TILE_SIZE
       const camMid = this.cameras.main.scrollY + GAME_HEIGHT / 2

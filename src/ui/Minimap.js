@@ -317,9 +317,13 @@ export default class Minimap {
     this.container.setScale(invZoom)
     this.godDot.setScale(invZoom)
     this.godTick.setScale(invZoom)
-    // Reposition to stay in the bottom-right corner at the correct offset
-    const ox = GAME_WIDTH - (MAP_DIAMETER / 2 + MARGIN) * invZoom
-    const oy = GAME_HEIGHT - (MAP_DIAMETER / 2 + MARGIN) * invZoom
+    // Reposition: scrollFactor(0) objects zoom around the viewport
+    // midpoint, so we invert that pivot to keep the disc pinned to the
+    // bottom-right corner at any zoom level.
+    const midX = GAME_WIDTH / 2
+    const midY = GAME_HEIGHT / 2
+    const ox = midX + (GAME_WIDTH - MAP_DIAMETER / 2 - MARGIN - midX) * invZoom
+    const oy = midY + (GAME_HEIGHT - MAP_DIAMETER / 2 - MARGIN - midY) * invZoom
     this.ring.x = ox
     this.ring.y = oy
     this.core.x = ox

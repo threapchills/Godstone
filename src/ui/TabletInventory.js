@@ -58,6 +58,13 @@ export default class TabletInventory {
     }
   }
 
+  /** All game objects belonging to this widget, for HUD container registration. */
+  getAllObjects() {
+    const objs = [this.heading]
+    for (const s of this.slots) objs.push(s.back, s.icon, s.label)
+    return objs
+  }
+
   // Build a small canvas glyph per level. Different shapes per level
   // give the slots distinct silhouettes at a glance.
   _ensureGlyph(level) {

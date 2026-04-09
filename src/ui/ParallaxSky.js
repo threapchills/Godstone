@@ -94,19 +94,21 @@ export default class ParallaxSky {
 
     // Star field: tiny additive dots seeded across the viewport.
     // They're invisible by day and fade in at night via update().
-    // Anchored to the viewport (scrollFactor 0) so they stay put as
-    // the camera moves; the night feel comes from the twinkle, not
-    // from parallax.
+    // Wrapped in a container that counter-scales against camera zoom
+    // so the stars always fill the viewport at any zoom level.
     this.stars = []
+    this.starContainer = scene.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2)
+      .setScrollFactor(0)
+      .setDepth(-6)
     const STAR_COUNT = 60
     for (let i = 0; i < STAR_COUNT; i++) {
-      const x = (i * 137 + 13) % GAME_WIDTH
-      const y = (i * 83 + 7) % Math.floor(GAME_HEIGHT * 0.7) // upper sky band
+      // Positions relative to container centre (viewport midpoint)
+      const x = ((i * 137 + 13) % GAME_WIDTH) - GAME_WIDTH / 2
+      const y = ((i * 83 + 7) % Math.floor(GAME_HEIGHT * 0.7)) - GAME_HEIGHT / 2
       const star = scene.add.circle(x, y, 0.7 + Math.random() * 0.8, 0xffffff, 1)
-        .setScrollFactor(0)
-        .setDepth(-6)
         .setBlendMode(1) // ADD blend constant
         .setAlpha(0)
+      this.starContainer.add(star)
       this.stars.push({
         sprite: star,
         twinklePhase: Math.random() * Math.PI * 2,
@@ -157,6 +159,12 @@ export default class ParallaxSky {
       ascend = Math.max(0, Math.min(1, (surfacePx - camMid) / (cam.height * 0.8)))
     }
 
+    // Counter-scale sky against camera zoom so it always fills the
+    // viewport. scrollFactor(0) objects are scaled by the camera zoom
+    // around the viewport centre; inverse-scaling cancels that out.
+    const invZoom = 1 / (cam.zoom || 1)
+    this.baseRect.setScale(invZoom)
+
     // Animate base rectangle colour through the cycle
     let skyColour = this._blend(nightTint, this.baseSky, 0.4 + day * 0.6)
     skyColour = this._blend(skyColour, dayBoost, day * 0.25 + ascend * 0.30)
@@ -164,6 +172,8 @@ export default class ParallaxSky {
     this.baseRect.fillColor = skyColour
 
     for (const layer of this.layers) {
+      layer.sprite.setScale(invZoom)
+
       // Parallax offset
       layer.sprite.tilePositionX = cam.scrollX * layer.parallaxX + this._windAccum * layer.windSpeed
       layer.sprite.tilePositionY = cam.scrollY * layer.parallaxY
@@ -173,6 +183,11 @@ export default class ParallaxSky {
       tint = this._blend(tint, dayBoost, day * 0.15 + ascend * 0.20)
       tint = this._blend(tint, horizonAmber, horizonGlow * 0.25)
       layer.sprite.setTint(tint)
+    }
+
+    // Star container: counter-scale so stars fill the viewport at any zoom.
+    if (this.starContainer) {
+      this.starContainer.setScale(invZoom)
     }
 
     // Star field: only visible at night (day = 0). Each star twinkles

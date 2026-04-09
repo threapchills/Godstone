@@ -278,10 +278,10 @@ export default class Village {
       const buildingX = cx + dx
       // Snap each building to its own column's ground so they hug hills
       // and valleys. Search starts a few tiles above the village anchor
-      // and is capped to a small window so a hut next to a chasm
-      // doesn't end up at the bottom of the world.
+      // with a generous walk distance so buildings always reach solid
+      // ground even across deep caves or eroded terrain.
       const py = grid
-        ? findGroundTileY(grid, Math.floor(buildingX / TILE_SIZE), Math.max(0, this.tileY - 6), this.tileY) * TILE_SIZE
+        ? findGroundTileY(grid, Math.floor(buildingX / TILE_SIZE), Math.max(0, this.tileY - 6), this.tileY, 200) * TILE_SIZE
         : this.tileY * TILE_SIZE
       const key = this._ensureBuildingTexture(type)
       const sprite = this.scene.add.sprite(buildingX, py, key)
@@ -295,10 +295,10 @@ export default class Village {
     this.sprite = this.buildings[0] || null
   }
 
-  // Continuous re-grounding: called from update each frame so buildings
-  // sit on the ground even after the god terraforms beneath them. Only
-  // the y is adjusted; x stays put. Falls back to the village anchor
-  // if no ground is found within the search window.
+  // Continuous re-grounding: called each frame so buildings settle
+  // after terraforming. Only moves when the building is genuinely
+  // floating (gap > 1 tile); small shifts from particle jitter are
+  // ignored to prevent visual bobbing on moving sand/water.
   updateGrounding() {
     const grid = this.scene.worldGrid?.grid
     if (!grid) return
@@ -306,11 +306,18 @@ export default class Village {
     for (const bld of this.buildings) {
       const tileX = Math.floor(bld.x / TILE_SIZE)
       const startTileY = Math.max(0, Math.floor(bld.y / TILE_SIZE) - 2)
-      const groundTileY = findGroundTileY(grid, tileX, startTileY, this.tileY)
+      const groundTileY = findGroundTileY(grid, tileX, startTileY, this.tileY, 200)
       const targetY = groundTileY * TILE_SIZE
-      if (Math.abs(bld.y - targetY) > 0.5) {
+      const dy = targetY - bld.y
+
+      if (dy > TILE_SIZE) {
+        // Floating above ground: fall smoothly toward it
+        bld.y += Math.min(dy, Math.max(2, dy * 0.12))
+      } else if (dy < -TILE_SIZE) {
+        // Ground rose well above the building (rare): snap up
         bld.y = targetY
       }
+      // ±1 tile jitter from particles is ignored entirely
     }
   }
 

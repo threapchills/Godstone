@@ -35,9 +35,12 @@ export default class SpellBar {
     this.manaFill = scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2, manaY, manaW, 4, 0x4488dd, 1)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
     // Tick marks splitting the bar into 3 segments (one per mana point)
+    this.manaTicks = []
     for (let i = 1; i < 3; i++) {
-      scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / 3), manaY, 1, 4, 0x000000, 0.6)
-        .setScrollFactor(0).setDepth(52)
+      this.manaTicks.push(
+        scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / 3), manaY, 1, 4, 0x000000, 0.6)
+          .setScrollFactor(0).setDepth(52)
+      )
     }
 
     for (let i = 0; i < 4; i++) {
@@ -70,6 +73,13 @@ export default class SpellBar {
 
       this.slots.push({ back, icon, cdMask, hotkey, cx, cy })
     }
+  }
+
+  /** All game objects belonging to this widget, for HUD container registration. */
+  getAllObjects() {
+    const objs = [this.label, this.manaBack, this.manaFill, ...this.manaTicks]
+    for (const s of this.slots) objs.push(s.back, s.icon, s.cdMask, s.hotkey)
+    return objs
   }
 
   _ensureSlotGlyph(slotIdx) {
