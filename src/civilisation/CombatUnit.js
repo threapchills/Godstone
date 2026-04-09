@@ -73,6 +73,12 @@ export default class CombatUnit {
     this._patrolTargetX = null
     this._patrolTargetY = null
 
+    // Pathfinding state: stuck detection + surface seeking
+    this._stuckTimer = 0
+    this._lastPosX = x
+    this._isFlying = false
+    this._surfaceSeekTimer = 0
+
     // Sprite: reuse the existing per-stage warrior texture builder
     const key = ensureWarriorTexture(scene, this.stage, clothingColour)
     this.sprite = scene.add.sprite(x, y, key)
@@ -267,18 +273,61 @@ export default class CombatUnit {
       }
     }
 
-    // Apply horizontal velocity with a damped seek so units don't
-    // ping-pong across their target.
+    // ── Stuck detection: if barely moved, escalate escape behaviour ──
+    if (Math.abs(this.sprite.x - this._lastPosX) < 0.5) {
+      this._stuckTimer += delta
+    } else {
+      this._stuckTimer = 0
+      this._lastPosX = this.sprite.x
+    }
+
+    // ── Surface seeking: if underground (below surface) and no target,
+    // fly upward to reach the surface where villages are ──
+    const surfaceHeights = worldGrid?.surfaceHeights
+    if (surfaceHeights && !target) {
+      const tileX = Math.floor(this.sprite.x / TILE_SIZE) % WORLD_WIDTH
+      const surfaceY = surfaceHeights[Math.abs(tileX)] || WORLD_HEIGHT * 0.3
+      const surfacePx = surfaceY * TILE_SIZE
+      if (this.sprite.y > surfacePx + TILE_SIZE * 8) {
+        // Underground: fly upward to reach the surface
+        this._isFlying = true
+        body.setGravityY(GRAVITY * 0.15)
+        body.setVelocityY(-250)
+        if (Math.abs(moveX) < 4) {
+          // Drift sideways while ascending to find an opening
+          body.setVelocityX((Math.sin(this.scene.time.now * 0.002 + this.sprite.x) * 0.5 + 0.5) * MAX_SPEED * (Math.random() < 0.5 ? 1 : -1))
+        }
+      } else if (this._isFlying && onGround) {
+        this._isFlying = false
+        body.setGravityY(GRAVITY)
+      }
+    }
+
+    // ── Apply horizontal velocity ──
     if (Math.abs(moveX) > 4) {
       body.setVelocityX(Math.sign(moveX) * MAX_SPEED)
       this.sprite.setFlipX(moveX < 0)
-    } else {
+    } else if (!this._isFlying) {
       body.setVelocityX(body.velocity.x * 0.7)
     }
 
-    // Jump over small obstacles
+    // ── Obstacle jumping: aggressive when stuck ──
     if (onGround && (body.blocked.left || body.blocked.right)) {
-      body.setVelocityY(-320)
+      body.setVelocityY(-350)
+    }
+    // Stuck escalation: if stuck for > 1s, start flying to escape
+    if (this._stuckTimer > 1000 && !this._isFlying) {
+      this._isFlying = true
+      body.setGravityY(GRAVITY * 0.15)
+      body.setVelocityY(-280)
+      // Reverse direction to try a different route
+      body.setVelocityX(-body.velocity.x || MAX_SPEED * (Math.random() < 0.5 ? 1 : -1))
+      this._stuckTimer = 0
+    }
+    // Return to ground mode when landing after a fly escape
+    if (this._isFlying && onGround && this._stuckTimer === 0) {
+      this._isFlying = false
+      body.setGravityY(GRAVITY)
     }
 
     // World wrap

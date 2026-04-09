@@ -412,7 +412,7 @@ export default class WorldScene extends Phaser.Scene {
 
   resetCameraFX() {
     this.targetTimeDilation = 1.0
-    this.camZoomTarget = 1.15
+    this.camZoomTarget = this._playerZoom || 1.15
     this._dilationResetTimer = 0
   }
 
@@ -596,7 +596,7 @@ export default class WorldScene extends Phaser.Scene {
   // with breathing room between rebuilds.
   onVillageProximity(village) {
     if (!village || village.isReceiving) return
-    if (village.stage >= 10) return // fully ascendant; nothing left to give
+    if (village.stage >= 20) return // fully ascendant; nothing left to give
 
     if (!village.canAccept(this.god.highestTablet)) {
       // Throttle the rejection hint per-village so it doesn't spam every frame
@@ -623,7 +623,7 @@ export default class WorldScene extends Phaser.Scene {
     // past 7 on the home world because highestTablet won't exceed the
     // available home tablets.
     const startStage = village.stage
-    const maxStage = Math.min(10, this.god.highestTablet + 1)
+    const maxStage = Math.min(20, this.god.highestTablet + 1)
     const upgrades = maxStage - startStage
     if (upgrades <= 0) {
       village.isReceiving = false
@@ -708,7 +708,7 @@ export default class WorldScene extends Phaser.Scene {
       this._dilationResetTimer += step
       if (this._dilationResetTimer > 0.6) {
         this.targetTimeDilation = 1.0
-        this.camZoomTarget = 1.15
+        this.camZoomTarget = this._playerZoom || 1.15
         this._dilationResetTimer = 0
       }
     }
@@ -1247,7 +1247,7 @@ export default class WorldScene extends Phaser.Scene {
 
     // Spawn a raid wave entering from the portal
     if (this.warDirector) {
-      this.warDirector.launchInvasion(18, this.villages[0])
+      this.warDirector.launchInvasion(80, this.villages[0])
       let placed = 0
       for (const u of this.warDirector.units) {
         if (u.team === 'enemy' && placed < 18) {
@@ -1270,7 +1270,11 @@ export default class WorldScene extends Phaser.Scene {
           this._inboundCheckTimer?.destroy()
           this._inboundCheckTimer = null
           this._inboundPortal = null
-          this.showMessage('The invader is vanquished. The portal resets.', 2200)
+          // Reward: defeating an invading god yields a knowledge tablet
+          this.god.highestTablet += 1
+          this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
+          this.showMessage(`The invader is vanquished! Knowledge tablet gained. (${this.god.highestTablet} total)`, 2800)
+          if (this.ambience?.playGong) this.ambience.playGong()
         }
       },
     })
@@ -1604,12 +1608,12 @@ export default class WorldScene extends Phaser.Scene {
 
   // ── Spell input ──────────────────────────────────────
   _wireSpellInput() {
-    // Mouse wheel cycles spells, left click casts at the cursor's
-    // world position. Pointer events use the camera's world transform
-    // so the cast lands where the player actually clicks.
+    // Mouse wheel controls camera zoom (god's-eye view ↔ close-up).
+    // Spells are selected via number keys 1/2/3 only.
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
-      if (!this.spellBook) return
-      this.spellBook.cycle(deltaY > 0 ? 1 : -1)
+      const step = deltaY > 0 ? -0.08 : 0.08
+      this._playerZoom = Math.max(0.35, Math.min(2.5, (this._playerZoom || 1.15) + step))
+      this.camZoomTarget = this._playerZoom
     })
 
     this.input.on('pointerdown', (pointer) => {

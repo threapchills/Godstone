@@ -3,13 +3,14 @@ import { buildPalette, TILES } from '../world/TileTypes.js'
 import { WanderingWarrior } from './Warrior.js'
 import { findGroundTileY } from '../utils/Grounding.js'
 
-// Stages 0-10. Stage 0 is the caveman fallback when a village has no
-// active belief and no tablet support; stages 8-10 are unlocked by
-// god statues carried home from raided worlds. Per-village pop caps
-// scale up significantly so a full home world with 16 villages at
-// stage 7 supports 2500+ people and a max-stage raid world supports
-// over 4000.
-const POP_CAPS = [4, 25, 50, 80, 115, 150, 185, 220, 260, 300, 340]
+// Stages 0-20. Stage 0 is the caveman fallback; stages 1-7 come from
+// home-world tablets; stages 8+ come from god statues (raid victories)
+// and defeating invading gods. At stage 20 villages are sprawling
+// megalopolii of the ancient world.
+const POP_CAPS = [
+  4, 25, 50, 80, 115, 150, 185, 220, 260, 300, 340,
+  /*11*/ 400, 480, 560, 650, 750, 860, 980, 1100, 1250, 1400,
+]
 
 // Growth rate is multiplied by belief, stage, and fertility factors in
 // updatePopulation. Bumped up so populations actually reach their caps
@@ -29,12 +30,21 @@ const MAX_VISIBLE_VILLAGERS = 50
 // Building counts and spread scale all the way through stage 10. Raid
 // tier villages sprawl into sprawling towns with temples, towers, and
 // walls across a ~60 tile radius.
-const BUILDING_COUNTS = [0, 1, 3, 5, 9, 14, 20, 28, 38, 50, 65]
-const STAGE_SPREAD     = [0, 4, 7, 11, 16, 22, 30, 40, 50, 60, 72]
+const BUILDING_COUNTS = [
+  0, 1, 3, 5, 9, 14, 20, 28, 38, 50, 65,
+  /*11*/ 80, 95, 110, 125, 140, 155, 170, 185, 200, 220,
+]
+const STAGE_SPREAD = [
+  0, 4, 7, 11, 16, 22, 30, 40, 50, 60, 72,
+  /*11*/ 85, 98, 112, 126, 140, 155, 170, 185, 200, 220,
+]
 const STAGE_NAMES = [
   'Caveman huddle', 'Cave dwellers', 'Fire-makers', 'Farmers',
   'Small village', 'Large village', 'Town', 'Civilisation',
   'Grand city', 'Imperium', 'Ascendant dominion',
+  /*11*/ 'Ancient metropolis', 'Citadel state', 'Sprawling kingdom',
+  'World wonder', 'Eternal empire', 'Ziggurat dominion',
+  'Mythic polis', 'Titan stronghold', 'God-throne', 'Megalopolis ascendant',
 ]
 
 // Population floor below which a village regresses to stage 0 if its
@@ -461,7 +471,7 @@ export default class Village {
   // least 1 tablet, a stage 4 village needs at least 5, etc. Tablets
   // are not pre-ordered; they are counted in pickup order.
   get nextRequiredTablet() {
-    if (this.stage >= 10) return null
+    if (this.stage >= 20) return null
     return this.stage + 1
   }
 
@@ -483,7 +493,7 @@ export default class Village {
   // first; this method just performs the upgrade and feedback.
   // Returns the new stage, or null if already maxed.
   receiveTablet() {
-    if (this.stage >= 10) return null
+    if (this.stage >= 20) return null
     this.stage += 1
     this.belief = Math.min(100, this.belief + 25)
     this.population += 5

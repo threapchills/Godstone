@@ -305,6 +305,32 @@ export default class Minimap {
     this.godDot.x = this.centerX
     this.godDot.y = this.centerY - r
 
+    // Counter-scale the entire minimap against camera zoom so it stays
+    // the same visual size on screen regardless of how far the player
+    // has zoomed in or out. All minimap elements use scrollFactor(0)
+    // so this inverse scale keeps the disc, ring, dots, and tick at
+    // a constant pixel size.
+    const camZoom = this.scene.cameras.main.zoom || 1
+    const invZoom = 1 / camZoom
+    this.ring.setScale(invZoom)
+    this.core.setScale(invZoom)
+    this.container.setScale(invZoom)
+    this.godDot.setScale(invZoom)
+    this.godTick.setScale(invZoom)
+    // Reposition to stay in the bottom-right corner at the correct offset
+    const ox = GAME_WIDTH - (MAP_DIAMETER / 2 + MARGIN) * invZoom
+    const oy = GAME_HEIGHT - (MAP_DIAMETER / 2 + MARGIN) * invZoom
+    this.ring.x = ox
+    this.ring.y = oy
+    this.core.x = ox
+    this.core.y = oy
+    this.container.x = ox
+    this.container.y = oy
+    this.godDot.x = ox
+    this.godDot.y = oy - r * invZoom
+    this.godTick.x = ox
+    this.godTick.y = oy - (OUTER_R + 2) * invZoom
+
     // Throttled texture refresh so dug terrain, water flow, and lava
     // erosion all propagate without burning a refresh every frame.
     this._refreshTimer += delta

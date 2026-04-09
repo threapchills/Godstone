@@ -32,7 +32,7 @@ export const COMBAT = {
     meleeCooldown: 600,
   },
   spells: {
-    boltDamage: 18,
+    boltDamage: 100,   // one-shot gods, demolish villages
     boltRange: 18 * 8,
   },
 }

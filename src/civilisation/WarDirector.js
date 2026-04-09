@@ -156,12 +156,12 @@ export default class WarDirector {
 
   _scaledRaidSize() {
     // Scale with the highest home village stage so raids track the
-    // player's progression. Early game gets small war bands; late game
-    // gets full incursions.
+    // player's progression. Early game gets moderate war bands; late
+    // game gets proper incursions with hundreds of warriors.
     const vs = this.scene.villages || []
     let topStage = 0
     for (const v of vs) if (v.stage > topStage) topStage = v.stage
-    return 6 + topStage * 3
+    return 30 + topStage * 12
   }
 
   _spawnRaidWave(size, sourceVillage = null) {
