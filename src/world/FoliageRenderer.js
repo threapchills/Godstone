@@ -57,10 +57,11 @@ const SAPLING_DROP_RANGE = 6 // tiles
 const TICK_INTERVAL = 8000 // 8 s
 
 export default class FoliageRenderer {
-  constructor(scene, worldGrid, palette) {
+  constructor(scene, worldGrid, palette, treeTextureKey) {
     this.scene = scene
     this.worldGrid = worldGrid
     this.palette = palette
+    this.treeTextureKey = treeTextureKey || 'sb_tree'
     this.trees = []
     this.time = 0
     this._tickTimer = 0
@@ -104,7 +105,7 @@ export default class FoliageRenderer {
     const worldX = tileX * TILE_SIZE + TILE_SIZE / 2
     const worldY = groundY * TILE_SIZE // top of the actual ground tile
 
-    const sprite = this.scene.add.sprite(worldX, worldY, 'sb_tree')
+    const sprite = this.scene.add.sprite(worldX, worldY, this.treeTextureKey)
     sprite.setOrigin(0.5, 1)
 
     // SkyBaby tree is 942x916px; target 40-64px wide in the 8px-tile world.

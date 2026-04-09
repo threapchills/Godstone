@@ -84,8 +84,8 @@ export default class Minimap {
 
     // God dot: outside the container, pinned above the disc centre. Its
     // y-offset varies with the god's depth in the world so shallow = near
-    // the rim, deep = near the core.
-    this.godDot = scene.add.circle(this.centerX, this.centerY - OUTER_R * 0.5, 2.8, 0xffd700, 1)
+    // the rim, deep = near the core. Cyan so it's distinct from gold villages.
+    this.godDot = scene.add.circle(this.centerX, this.centerY - OUTER_R * 0.5, 3.2, 0x00ffcc, 1)
       .setScrollFactor(0)
       .setDepth(49)
 
@@ -93,7 +93,7 @@ export default class Minimap {
     this.godTick = scene.add.triangle(
       this.centerX, this.centerY - OUTER_R - 2,
       0, 3, -3, -3, 3, -3,
-      0xffd700, 1
+      0x00ffcc, 1
     ).setScrollFactor(0).setDepth(49)
 
     this.villageDots = []
@@ -245,12 +245,45 @@ export default class Minimap {
 
   addTabletMarker(tablet) {
     if (tablet.collected) return null
-    const dot = this.scene.add.circle(0, 0, 2, 0x00ffaa, 0.95)
+    // Tablets shown as an X cross so they read as treasure, not villages
     const p = this.projectLocal(tablet.tileX, tablet.tileY)
-    dot.x = p.x
-    dot.y = p.y
-    this.container.add(dot)
-    return dot
+    const gfx = this.scene.add.graphics().setDepth(0)
+    const s = 3 // half-arm length
+    gfx.lineStyle(1.4, 0x9affe6, 1)
+    gfx.beginPath()
+    gfx.moveTo(p.x - s, p.y - s)
+    gfx.lineTo(p.x + s, p.y + s)
+    gfx.moveTo(p.x + s, p.y - s)
+    gfx.lineTo(p.x - s, p.y + s)
+    gfx.strokePath()
+    // Small glow dot behind the X for visibility
+    const glow = this.scene.add.circle(p.x, p.y, 2.5, 0x9affe6, 0.25)
+    this.container.add(glow)
+    this.container.add(gfx)
+    // Return a container-like reference so visibility toggle works
+    const wrapper = { setVisible(v) { gfx.setVisible(v); glow.setVisible(v) } }
+    return wrapper
+  }
+
+  addPortalMarker(portal) {
+    if (!portal) return null
+    const p = this.projectLocal(portal.tileX, portal.tileY)
+    // Portal: bright pulsing diamond so it's unmissable
+    const diamond = this.scene.add.polygon(0, 0, [0, -5, 4, 0, 0, 5, -4, 0], 0x4488ff, 0.95)
+    diamond.x = p.x
+    diamond.y = p.y
+    diamond.setStrokeStyle(1, 0x88ccff, 1)
+    this.container.add(diamond)
+    // Pulse the portal marker
+    this.scene.tweens.add({
+      targets: diamond,
+      scale: { from: 1, to: 1.5 },
+      alpha: { from: 0.95, to: 0.4 },
+      yoyo: true,
+      repeat: -1,
+      duration: 1200,
+    })
+    return diamond
   }
 
   update(godSprite, delta = 16) {

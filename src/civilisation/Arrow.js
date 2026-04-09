@@ -51,6 +51,31 @@ export default class Arrow {
 
     this.vx = Math.cos(angle) * ARROW_SPEED
     this.vy = Math.sin(angle) * ARROW_SPEED
+
+    // Arrow release sound: short procedural whoosh via Web Audio
+    this._playShootSound()
+  }
+
+  _playShootSound() {
+    try {
+      const ambience = this.scene.ambience
+      if (!ambience?.ctx) return
+      const ctx = ambience.ctx
+      // Short noise burst shaped as a whoosh
+      const duration = 0.06
+      const buf = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate)
+      const data = buf.getChannelData(0)
+      for (let i = 0; i < data.length; i++) {
+        const t = i / data.length
+        data[i] = (Math.random() * 2 - 1) * (1 - t) * 0.15
+      }
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      const gain = ctx.createGain()
+      gain.gain.value = 0.08
+      src.connect(gain).connect(ctx.destination)
+      src.start()
+    } catch (e) { /* audio not ready */ }
   }
 
   update(delta) {

@@ -52,6 +52,16 @@ export default class PortalHenge {
     const r = this.interactionRadius
     const inRange = distSq < r * r
 
+    // Block portal if an invasion is active (enemy god alive)
+    if (inRange && this.state === 'DORMANT' && this.scene.enemyGod?.alive) {
+      // Only show the warning once per approach (throttle)
+      if (!this._invasionWarnTime || time - this._invasionWarnTime > 3000) {
+        this._invasionWarnTime = time
+        this.scene.showMessage?.('Defeat the invading god before using the portal!', 2000)
+      }
+      return
+    }
+
     // Show the prompt when the god enters range and the portal is idle
     if (inRange && this.state === 'DORMANT') {
       this.state = 'CHOOSING'

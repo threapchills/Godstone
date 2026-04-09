@@ -109,14 +109,43 @@ export default class CombatUnit {
     if (!this.alive) return
     this.hp -= amount
     if (this.sprite) {
-      this.sprite.setTint(0xff8888)
+      this.sprite.setTint(0xff4444)
       this.scene.time.delayedCall(90, () => this.sprite && this.sprite.clearTint())
+      // Blood splatter: a burst of crimson droplets at the impact site
+      this._spawnBlood(4 + Math.floor(amount * 0.5))
     }
     if (this.hp <= 0) this._die()
   }
 
+  _spawnBlood(count) {
+    if (!this.scene || !this.sprite) return
+    const cx = this.sprite.x
+    const cy = this.sprite.y - this.sprite.height * 0.5
+    const bloodColours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100]
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const speed = 20 + Math.random() * 60
+      const colour = bloodColours[i % bloodColours.length]
+      const size = 1.0 + Math.random() * 1.5
+      const p = this.scene.add.circle(cx, cy, size, colour, 0.9)
+        .setDepth(15)
+      this.scene.tweens.add({
+        targets: p,
+        x: cx + Math.cos(angle) * speed * 0.5,
+        y: cy + Math.sin(angle) * speed * 0.5 + 8, // gravity pull
+        alpha: 0,
+        scale: 0.15,
+        duration: 300 + Math.random() * 250,
+        ease: 'Quad.easeOut',
+        onComplete: () => p.destroy(),
+      })
+    }
+  }
+
   _die() {
     this.alive = false
+    // Big blood burst on death
+    if (this.sprite) this._spawnBlood(10 + Math.floor(Math.random() * 6))
     if (this.sprite) {
       // Quick fade so the body stays visible for a beat
       this.scene.tweens.add({

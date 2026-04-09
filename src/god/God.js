@@ -327,11 +327,37 @@ export default class God {
     if (this.sprite) {
       this.sprite.setTint(0xff5555)
       this.scene.time.delayedCall(140, () => this.sprite && this.sprite.clearTint())
+      // Blood burst on the player god for visceral feedback
+      this._spawnBlood(5 + Math.floor(amount * 0.4))
     }
+    if (this.scene.addJuice) this.scene.addJuice('light')
     if (this.hp <= 0) {
       // Reset HP on respawn; the scene's respawnGod handles the move
       this.hp = this.maxHp
       if (this.scene.respawnGod) this.scene.respawnGod()
+    }
+  }
+
+  _spawnBlood(count) {
+    if (!this.scene || !this.sprite) return
+    const cx = this.sprite.x
+    const cy = this.sprite.y - this.sprite.height * 0.4
+    const colours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100]
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const speed = 15 + Math.random() * 50
+      const p = this.scene.add.circle(cx, cy, 1.0 + Math.random() * 1.4, colours[i % colours.length], 0.85)
+        .setDepth(15)
+      this.scene.tweens.add({
+        targets: p,
+        x: cx + Math.cos(angle) * speed * 0.5,
+        y: cy + Math.sin(angle) * speed * 0.5 + 8,
+        alpha: 0,
+        scale: 0.1,
+        duration: 280 + Math.random() * 200,
+        ease: 'Quad.easeOut',
+        onComplete: () => p.destroy(),
+      })
     }
   }
 

@@ -1,5 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT } from '../core/Constants.js'
 import { TILES } from '../world/TileTypes.js'
+import { pickVariants } from '../world/AssetVariants.js'
 
 // Multi-layer parallax sky using SkyBaby's painted layers, plus
 // additional procedural depth bands. All layers are anchored to the
@@ -27,6 +28,14 @@ export default class ParallaxSky {
       this.baseSky
     ).setScrollFactor(0).setDepth(-12)
 
+    // Pick variant sky textures per world seed so each world has a
+    // dramatically different sky. Falls back to the originals if a
+    // variant texture didn't load (missing file, etc.).
+    const variants = pickVariants(params?.seed || 0)
+    const skyTex1 = scene.textures.exists(variants.skyLayer1) ? variants.skyLayer1 : 'sb_sky1'
+    const skyTex2 = scene.textures.exists(variants.skyLayer2) ? variants.skyLayer2 : 'sb_sky2'
+    const cloudTex = scene.textures.exists(variants.skyClouds) ? variants.skyClouds : 'sb_clouds'
+
     // Layer definitions (depth-sorted, far-to-near)
     // px/py: parallax rates (0 = no movement, 1 = locked to camera)
     // tint: target hue blend with element palette
@@ -36,15 +45,16 @@ export default class ParallaxSky {
 
     const defs = [
       // Distant sky wash (very slow parallax, blurry feel via low alpha)
-      { key: 'sb_sky1', px: 0.03, py: 0.06, alpha: 0.65, depth: -11, wind: 0.5, tint: skyHue, blend: 0.4 },
+      { key: skyTex1, px: 0.03, py: 0.06, alpha: 0.70, depth: -11, wind: 0.5, tint: skyHue, blend: 0.20 },
       // Mid-distance cloud band
-      { key: 'sb_sky2', px: 0.10, py: 0.10, alpha: 0.55, depth: -10, wind: 2,   tint: skyHue, blend: 0.35 },
-      // Painted clouds (the most distinct layer)
-      { key: 'sb_clouds', px: 0.20, py: 0.15, alpha: 0.55, depth: -9,  wind: 5,   tint: 0xffffff, blend: 0 },
+      { key: skyTex2, px: 0.10, py: 0.10, alpha: 0.60, depth: -10, wind: 2,   tint: skyHue, blend: 0.18 },
+      // Painted clouds (the most distinct layer); low blend so the
+      // painting's own hues dominate rather than being washed out
+      { key: cloudTex, px: 0.20, py: 0.15, alpha: 0.60, depth: -9,  wind: 5,   tint: 0xffffff, blend: 0 },
       // Near cloud streaks (faster, more saturated tint for atmosphere)
-      { key: 'sb_clouds', px: 0.35, py: 0.20, alpha: 0.30, depth: -8,  wind: 12,  tint: accentHue, blend: 0.5 },
+      { key: cloudTex, px: 0.35, py: 0.20, alpha: 0.30, depth: -8,  wind: 12,  tint: accentHue, blend: 0.25 },
       // Foreground mist veil (fastest, most blurred)
-      { key: 'sb_sky2',   px: 0.55, py: 0.30, alpha: 0.18, depth: -7,  wind: 22,  tint: skyHue, blend: 0.6 },
+      { key: skyTex2,   px: 0.55, py: 0.30, alpha: 0.18, depth: -7,  wind: 22,  tint: skyHue, blend: 0.30 },
     ]
 
     for (const def of defs) {

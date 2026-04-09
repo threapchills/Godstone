@@ -12,9 +12,9 @@ export const GAME_HEIGHT = 640
 
 // Physics
 export const GRAVITY = 800
-export const GOD_SPEED = 200
-export const GOD_JUMP = -350
-export const GOD_FLY_SPEED = -200
+export const GOD_SPEED = 160       // was 200; slightly slower base pace
+export const GOD_JUMP = -330       // proportional to speed reduction
+export const GOD_FLY_SPEED = -170
 
 // Elements
 export const ELEMENTS = {

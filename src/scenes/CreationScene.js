@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { GAME_WIDTH, GAME_HEIGHT, ELEMENTS } from '../core/Constants.js'
 import { buildPalette } from '../world/TileTypes.js'
+import { SKY_VARIANTS } from '../world/AssetVariants.js'
 
 // Element pair descriptions from the spec
 const PAIR_NAMES = {
@@ -32,6 +33,14 @@ export default class CreationScene extends Phaser.Scene {
     this.load.image('sb_teepee_blue', 'assets/environment/teepee_blue.png')
     this.load.image('sb_teepee_green', 'assets/environment/teepee_green.png')
     this.load.image('leaf', 'assets/environment/leaf.png')
+
+    // Sky variant paintings: each world picks from these per seed
+    for (const key of SKY_VARIANTS) {
+      this.load.image(`skyvar_${key}`, `assets/backgrounds/sky-variants/${key}.png`)
+    }
+    // Tree variant silhouettes
+    this.load.image('treevar_tree_pine', 'assets/backgrounds/tree-variants/tree_pine.png')
+    this.load.image('treevar_tree_willow', 'assets/backgrounds/tree-variants/tree_willow.png')
   }
 
   create() {

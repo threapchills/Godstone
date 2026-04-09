@@ -1,7 +1,8 @@
 import Phaser from 'phaser'
-import { TILE_SIZE, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
+import { TILE_SIZE, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT, ELEMENTS, ELEMENT_PAIRS } from '../core/Constants.js'
 import { SOLID_TILES } from '../world/TileTypes.js'
 import { COMBAT } from './Combat.js'
+import { createGodTexture, GOD_W, GOD_H } from '../god/GodRenderer.js'
 
 // A roaming rival deity. Walks, jumps, lifts off when blocked or when
 // the player is far above. AI is a tiny state machine: WANDER → SEEK
@@ -12,7 +13,9 @@ import { COMBAT } from './Combat.js'
 const STATE = { WANDER: 'wander', SEEK: 'seek', ENGAGE: 'engage', FLEE: 'flee' }
 
 export default class EnemyGod {
-  constructor(scene, x, y) {
+  // enemySeed: optional random seed for procedural appearance.
+  // If not provided, falls back to a timestamp-derived seed.
+  constructor(scene, x, y, enemySeed) {
     this.scene = scene
     this.hp = COMBAT.enemyGod.maxHp
     this.maxHp = COMBAT.enemyGod.maxHp
@@ -28,45 +31,31 @@ export default class EnemyGod {
     this._isFlying = false
     this.alive = true
 
+    // Randomly generated appearance each time
+    this.enemySeed = enemySeed ?? Math.floor(Math.random() * 999999)
     this._buildSprite(scene, x, y)
     this._buildHpBar(scene)
   }
 
   _buildSprite(scene, x, y) {
-    const key = 'enemy-god-sprite'
-    if (!scene.textures.exists(key)) {
-      const c = document.createElement('canvas')
-      c.width = 16
-      c.height = 22
-      const ctx = c.getContext('2d')
-      // Crimson cloak with a horned silhouette so it reads as evil
-      ctx.fillStyle = '#1a0a14'
-      ctx.fillRect(2, 6, 12, 14)
-      ctx.fillStyle = '#3a0a1a'
-      ctx.fillRect(3, 7, 10, 12)
-      // Head
-      ctx.fillStyle = '#5a3a2a'
-      ctx.fillRect(5, 1, 6, 6)
-      // Horns
-      ctx.fillStyle = '#222222'
-      ctx.fillRect(4, 0, 1, 3)
-      ctx.fillRect(11, 0, 1, 3)
-      // Glowing eyes
-      ctx.fillStyle = '#ff3322'
-      ctx.fillRect(6, 3, 1, 1)
-      ctx.fillRect(9, 3, 1, 1)
-      // Cloak hem
-      ctx.fillStyle = '#0a0006'
-      ctx.fillRect(1, 19, 14, 2)
-      scene.textures.addCanvas(key, c)
+    // Pick a random element pair for this rival god's appearance
+    const pair = ELEMENT_PAIRS[this.enemySeed % ELEMENT_PAIRS.length]
+    const enemyParams = {
+      seed: this.enemySeed,
+      element1: pair[0],
+      element2: pair[1],
+      elementRatio: 3 + (this.enemySeed % 5), // 3-7 for variety
     }
+    const { key } = createGodTexture(scene, enemyParams)
     this.sprite = scene.add.sprite(x, y, key)
     this.sprite.setOrigin(0.5, 1)
     this.sprite.setDepth(11)
+    // Red tint overlay so it reads as hostile at a glance
+    this.sprite.setTint(0xff8888)
     scene.physics.add.existing(this.sprite)
     this.sprite.body.setGravityY(GRAVITY)
-    this.sprite.body.setSize(12, 18)
-    this.sprite.body.setOffset(2, 4)
+    this.sprite.body.setSize(14, 24)
+    this.sprite.body.setOffset(5, 8)
     this.sprite.body.setMaxVelocityY(500)
   }
 
@@ -115,6 +104,7 @@ export default class EnemyGod {
     if (!this.scene || !this.sprite) return
     const cx = this.sprite.x
     const cy = this.sprite.y - this.sprite.height * 0.6
+    // Energy sparks
     for (let i = 0; i < 7; i++) {
       const angle = Math.random() * Math.PI * 2
       const speed = 30 + Math.random() * 50
@@ -129,6 +119,24 @@ export default class EnemyGod {
         alpha: 0,
         scale: 0.2,
         duration: 350 + Math.random() * 150,
+        ease: 'Quad.easeOut',
+        onComplete: () => p.destroy(),
+      })
+    }
+    // Blood droplets for visceral punch
+    const bloodColours = [0xaa0000, 0x880011, 0xcc1111, 0x660000]
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const speed = 15 + Math.random() * 40
+      const p = this.scene.add.circle(cx, cy, 1.2 + Math.random(), bloodColours[i % bloodColours.length], 0.85)
+        .setDepth(21)
+      this.scene.tweens.add({
+        targets: p,
+        x: cx + Math.cos(angle) * speed * 0.4,
+        y: cy + Math.sin(angle) * speed * 0.4 + 10,
+        alpha: 0,
+        scale: 0.1,
+        duration: 280 + Math.random() * 200,
         ease: 'Quad.easeOut',
         onComplete: () => p.destroy(),
       })
