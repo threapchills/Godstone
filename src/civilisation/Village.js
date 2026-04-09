@@ -456,15 +456,15 @@ export default class Village {
   // gated by god statues carried home from raided worlds. Stage 0 is
   // the caveman fallback and needs a level 1 tablet like stage 1.
   // Returns null once the village is fully ascendant.
+  // How many tablets does the god need to have collected before this
+  // village can advance? Simply stage + 1: a stage 0 village needs at
+  // least 1 tablet, a stage 4 village needs at least 5, etc. Tablets
+  // are not pre-ordered; they are counted in pickup order.
   get nextRequiredTablet() {
     if (this.stage >= 10) return null
-    // Cavemen (stage 0) need the level 1 tablet to become dwellers
-    return Math.max(1, this.stage + 1 - (this.stage === 0 ? 1 : 0))
+    return this.stage + 1
   }
 
-  // Can the god's current tablet collection upgrade this village?
-  // highestTablet is the integer count of tablets the god has ever
-  // picked up (since tablets are persistent and incremental in level).
   canAccept(highestTablet) {
     const need = this.nextRequiredTablet
     if (need == null) return false

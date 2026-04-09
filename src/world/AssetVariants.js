@@ -18,10 +18,11 @@ export const SKY_VARIANTS = [
   'sky_toxic',
 ]
 
+// Tree variants disabled: the pine/willow PNGs have opaque backgrounds
+// that show as visible boxes. Reverting to the original single tree.
+// To re-enable: add entries here and fix the source PNGs' transparency.
 export const TREE_VARIANTS = [
-  'tree_default',   // the original sb_tree
-  'tree_pine',
-  'tree_willow',
+  'tree_default',
 ]
 
 // Deterministic pick from an array using a seed-derived hash.

@@ -38,9 +38,6 @@ export default class CreationScene extends Phaser.Scene {
     for (const key of SKY_VARIANTS) {
       this.load.image(`skyvar_${key}`, `assets/backgrounds/sky-variants/${key}.png`)
     }
-    // Tree variant silhouettes
-    this.load.image('treevar_tree_pine', 'assets/backgrounds/tree-variants/tree_pine.png')
-    this.load.image('treevar_tree_willow', 'assets/backgrounds/tree-variants/tree_willow.png')
   }
 
   create() {

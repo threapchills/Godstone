@@ -536,10 +536,10 @@ export default class WorldScene extends Phaser.Scene {
   onTabletPickup(tablet) {
     if (!tablet || tablet.collected) return
     if (tablet.collect()) {
-      const level = this.god.collectTablet()
+      const count = this.god.collectTablet()
       this.tabletHUD.setText(`Tablets: ${this.god.highestTablet}`)
       if (tablet._minimapDot) tablet._minimapDot.setVisible(false)
-      this.showMessage(`Ancient tablet found. It is the level ${level} tablet.`)
+      this.showMessage(`Ancient tablet found! ${count} collected.`)
 
       this.hintText.setText('Visit your villages to share this knowledge')
       this.hintText.setAlpha(1)
@@ -590,9 +590,10 @@ export default class WorldScene extends Phaser.Scene {
       const now = this.time.now
       if (!village._lastRejectionHint || now - village._lastRejectionHint > 4000) {
         village._lastRejectionHint = now
-        if (this.god.highestTablet > 0) {
-          const need = village.nextRequiredTablet
-          this.showMessage(`${village.name} needs the level ${need} tablet first.`, 1800)
+        const need = village.nextRequiredTablet
+        const have = this.god.highestTablet
+        if (have > 0) {
+          this.showMessage(`${village.name} needs ${need} tablet${need > 1 ? 's' : ''} to advance. You have ${have}.`, 1800)
         } else {
           this.showMessage(`${village.name} is waiting for ancient knowledge.`, 1800)
         }
@@ -1220,6 +1221,9 @@ export default class WorldScene extends Phaser.Scene {
     portal.state = 'ACTIVE_INBOUND'
     if (this.addJuice) this.addJuice('severe')
     if (this.showMessage) this.showMessage('A god strides through the portal!', 2200)
+
+    // First inbound activates the automatic raid cycle going forward
+    if (this.warDirector) this.warDirector.enableRaidCycle()
 
     // Spawn a randomly generated enemy god at the portal
     const portalX = portal.worldX

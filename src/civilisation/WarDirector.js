@@ -42,6 +42,10 @@ export default class WarDirector {
     this.projectiles = [] // arrows, spells, etc.
     this._nextPatrolCheck = 0
     this._msgShown = false
+    // Automatic raid waves are disabled until the player triggers
+    // their first inbound invasion via the portal. Before that the
+    // world is peaceful exploration only.
+    this._raidCycleEnabled = false
   }
 
   // Manual trigger: called from portal mechanics (Phase 7) to start a
@@ -52,25 +56,33 @@ export default class WarDirector {
     this.stateTimer = WAR_CYCLE.RAID.nextIn
   }
 
+  // Enable the automatic raid cycle. Called when the player first
+  // triggers an inbound invasion; after that, periodic raids continue.
+  enableRaidCycle() {
+    this._raidCycleEnabled = true
+  }
+
   update(delta) {
     if (!this.scene.worldReady) return
-    this.stateTimer -= delta
 
-    // State transitions
-    if (this.stateTimer <= 0) {
-      const transition = WAR_CYCLE[this.state]
-      if (transition) {
-        this.state = transition.next
-        this.stateTimer = WAR_CYCLE[this.state].nextIn
-        this._onEnterState()
+    // Automatic raid cycle only runs after the player has triggered
+    // their first portal invasion. Until then the world is peaceful.
+    if (this._raidCycleEnabled) {
+      this.stateTimer -= delta
+      if (this.stateTimer <= 0) {
+        const transition = WAR_CYCLE[this.state]
+        if (transition) {
+          this.state = transition.next
+          this.stateTimer = WAR_CYCLE[this.state].nextIn
+          this._onEnterState()
+        }
       }
-    }
 
-    // Periodic home patrol dispatch during RAID state
-    this._nextPatrolCheck -= delta
-    if (this._nextPatrolCheck <= 0 && this.state === 'RAID') {
-      this._nextPatrolCheck = 6000
-      this._dispatchHomePatrols()
+      this._nextPatrolCheck -= delta
+      if (this._nextPatrolCheck <= 0 && this.state === 'RAID') {
+        this._nextPatrolCheck = 6000
+        this._dispatchHomePatrols()
+      }
     }
 
     // Update combat units
