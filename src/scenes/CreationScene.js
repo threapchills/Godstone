@@ -30,6 +30,8 @@ export default class CreationScene extends Phaser.Scene {
     this.load.image('sb_sky1', 'assets/backgrounds/sky_layer_1.jpeg')
     this.load.image('sb_sky2', 'assets/backgrounds/sky_layer_2.png')
     this.load.image('sb_clouds', 'assets/backgrounds/clouds_fg.png')
+    this.load.image('dist_mountains', 'assets/storybook_overhaul/distant_mountains.png')
+    this.load.image('fluffy_clouds', 'assets/storybook_overhaul/fluffy_clouds.png')
     this.load.image('sb_teepee_blue', 'assets/environment/teepee_blue.png')
     this.load.image('sb_teepee_green', 'assets/environment/teepee_green.png')
     this.load.image('leaf', 'assets/environment/leaf.png')
@@ -42,7 +44,29 @@ export default class CreationScene extends Phaser.Scene {
 
   create() {
     const cx = GAME_WIDTH / 2
-    this.cameras.main.setBackgroundColor('#0d0d1a')
+    this.cameras.main.setBackgroundColor('#eef2f5')
+
+    // Animated watercolor background
+    const bgMountains = this.add.image(cx, GAME_HEIGHT - 60, 'dist_mountains').setOrigin(0.5, 1).setScale(1.3).setAlpha(0.6)
+    
+    // Drifting clouds for atmosphere
+    this.cloudLayer1 = this.add.image(cx, GAME_HEIGHT / 3, 'fluffy_clouds').setOrigin(0.5).setScale(1.5).setAlpha(0.7)
+    this.tweens.add({
+      targets: this.cloudLayer1,
+      x: cx - 120,
+      y: (GAME_HEIGHT / 3) + 20,
+      duration: 25000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    })
+
+    // UI Translucent Overlay
+    this.add.graphics()
+      .fillStyle(0x1a1c23, 0.75)
+      .fillRoundedRect(cx - 260, 20, 520, GAME_HEIGHT - 60, 16)
+      .lineStyle(2, 0xd4c7b0, 0.2)
+      .strokeRoundedRect(cx - 260, 20, 520, GAME_HEIGHT - 60, 16)
 
     // State
     this.selectedElements = []
@@ -51,26 +75,27 @@ export default class CreationScene extends Phaser.Scene {
     this.worldSeed = Math.floor(Math.random() * 999999)
 
     // Title
-    this.add.text(cx, 36, 'GODSTONE', {
+    const titleText = this.add.text(cx, 48, 'GODSTONE', {
       fontFamily: 'Georgia, serif',
-      fontSize: '48px',
-      color: '#c07a28',
-      stroke: '#1a0a04',
-      strokeThickness: 4,
+      fontSize: '54px',
+      color: '#e4b660',
+      stroke: '#5a3a18',
+      strokeThickness: 5,
     }).setOrigin(0.5)
+    titleText.setShadow(2, 4, '#111111', 6, true, true)
 
-    this.add.text(cx, 74, 'Shape your world', {
+    this.add.text(cx, 88, 'Shape your world', {
       fontFamily: 'Georgia, serif',
-      fontSize: '16px',
-      color: '#4a7a6a',
+      fontSize: '18px',
+      color: '#8abfa0',
       fontStyle: 'italic',
-    }).setOrigin(0.5)
+    }).setOrigin(0.5).setShadow(1, 2, '#000000', 3, true, true)
 
     // Element selection
-    this.add.text(cx, 108, 'Choose two elements', {
+    this.add.text(cx, 120, 'Choose two elements', {
       fontFamily: 'Georgia, serif',
-      fontSize: '13px',
-      color: '#888888',
+      fontSize: '14px',
+      color: '#aaaaaa',
     }).setOrigin(0.5)
 
     this.elementButtons = {}
@@ -87,27 +112,27 @@ export default class CreationScene extends Phaser.Scene {
     })
 
     // Pair name display (appears after two elements selected)
-    this.pairNameText = this.add.text(cx, 177, '', {
+    this.pairNameText = this.add.text(cx, 190, '', {
       fontFamily: 'Georgia, serif',
-      fontSize: '14px',
-      color: '#c07a28',
-    }).setOrigin(0.5).setVisible(false)
+      fontSize: '16px',
+      color: '#e4b660',
+    }).setOrigin(0.5).setVisible(false).setShadow(1, 2, '#000000', 3, true, true)
 
-    this.pairDescText = this.add.text(cx, 194, '', {
+    this.pairDescText = this.add.text(cx, 208, '', {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#666666',
+      fontSize: '12px',
+      color: '#aaaaaa',
       fontStyle: 'italic',
     }).setOrigin(0.5).setVisible(false)
 
     // Ratio slider
-    this.ratioLabel = this.add.text(cx, 218, '', {
+    this.ratioLabel = this.add.text(cx, 235, '', {
       fontFamily: 'Georgia, serif',
-      fontSize: '12px',
-      color: '#888888',
+      fontSize: '13px',
+      color: '#aaaaaa',
     }).setOrigin(0.5).setVisible(false)
 
-    this.ratioSlider = this.createSlider(cx, 240, 200, (value) => {
+    this.ratioSlider = this.createSlider(cx, 255, 200, (value) => {
       this.elementRatio = Math.round(value * 10)
       this.updateRatioLabel()
       this.updatePreview()
@@ -116,99 +141,130 @@ export default class CreationScene extends Phaser.Scene {
 
     // Colour preview strip (shows palette sample)
     this.previewGraphics = this.add.graphics().setDepth(5)
-    this.previewY = 260
+    this.previewY = 275
 
     // Terrain sliders
-    this.add.text(cx, 288, 'Terrain', {
+    this.add.text(cx, 305, 'Terrain', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '14px',
+      color: '#aaaaaa',
+    }).setOrigin(0.5)
+
+    this.createTerrainSlider(cx, 335, 'Sky', 'Cave', 'skyCave')
+    this.createTerrainSlider(cx, 365, 'Barren', 'Fertile', 'barrenFertile')
+    this.createTerrainSlider(cx, 395, 'Sparse', 'Dense', 'sparseDense')
+
+    // Seed display
+    this.seedText = this.add.text(cx - 65, 430, `Seed: ${this.worldSeed}`, {
       fontFamily: 'Georgia, serif',
       fontSize: '13px',
       color: '#888888',
-    }).setOrigin(0.5)
-
-    this.createTerrainSlider(cx, 318, 'Sky', 'Cave', 'skyCave')
-    this.createTerrainSlider(cx, 348, 'Barren', 'Fertile', 'barrenFertile')
-    this.createTerrainSlider(cx, 378, 'Sparse', 'Dense', 'sparseDense')
-
-    // Seed display
-    this.seedText = this.add.text(cx - 60, 410, `Seed: ${this.worldSeed}`, {
-      fontFamily: 'Georgia, serif',
-      fontSize: '12px',
-      color: '#555555',
     }).setOrigin(0, 0.5)
 
     // Randomise seed button
-    const rerollBtn = this.add.text(cx + 60, 410, '[reroll]', {
+    const rerollBtn = this.add.text(cx + 65, 430, '[reroll]', {
       fontFamily: 'Georgia, serif',
-      fontSize: '12px',
-      color: '#777777',
+      fontSize: '13px',
+      color: '#bbbbbb',
     }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true })
 
     rerollBtn.on('pointerdown', () => {
       this.worldSeed = Math.floor(Math.random() * 999999)
       this.seedText.setText(`Seed: ${this.worldSeed}`)
     })
-    rerollBtn.on('pointerover', () => rerollBtn.setColor('#aaaaaa'))
-    rerollBtn.on('pointerout', () => rerollBtn.setColor('#777777'))
+    rerollBtn.on('pointerover', () => rerollBtn.setColor('#ffffff'))
+    rerollBtn.on('pointerout', () => rerollBtn.setColor('#bbbbbb'))
 
-    // Create button
-    this.createButton = this.add.text(cx, 460, '[ Create world ]', {
+    // Create button setup
+    this.createBtnContainer = this.add.container(cx, 485)
+    
+    this.createBtnBg = this.add.graphics()
+    this.createBtnContainer.add(this.createBtnBg)
+    
+    this.createButton = this.add.text(0, 0, 'Create World', {
       fontFamily: 'Georgia, serif',
       fontSize: '22px',
-      color: '#333333',
+      color: '#888888',
       stroke: '#000000',
-      strokeThickness: 1,
-    }).setOrigin(0.5)
+      strokeThickness: 2,
+    }).setOrigin(0.5).setShadow(1, 2, '#000000', 3, true, true)
+    
+    this.createBtnContainer.add(this.createButton)
+    
+    const cwHit = new Phaser.Geom.Rectangle(-100, -25, 200, 50)
+    this.createBtnContainer.setInteractive(cwHit, Phaser.Geom.Rectangle.Contains)
+    this.createBtnContainer.input.cursor = 'default'
 
     this.updateCreateButton()
 
     // Instructions
-    this.add.text(cx, 520, 'WASD or arrows to move  |  Up to jump  |  Space to fly  |  Down to dig', {
+    this.add.text(cx, 550, 'WASD or arrows to move  |  Up to jump  |  Space to fly  |  Down to dig', {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#444444',
+      fontSize: '12px',
+      color: '#777777',
     }).setOrigin(0.5)
 
-    this.add.text(cx, 540, 'Explore caves to find ancient tablets. Deliver them to villages.', {
+    this.add.text(cx, 570, 'Explore caves to find ancient tablets. Deliver them to villages.', {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#444444',
+      fontSize: '12px',
+      color: '#777777',
     }).setOrigin(0.5)
   }
 
   createElementButton(x, y, label, colour, key) {
     const colourInt = Phaser.Display.Color.HexStringToColor(colour).color
-    const bg = this.add.rectangle(x, y, 80, 34, colourInt, 0.12)
-    bg.setStrokeStyle(2, colourInt, 0.3)
-    bg.setInteractive({ useHandCursor: true })
+    const container = this.add.container(x, y + 10)
+    
+    const bgGfx = this.add.graphics()
+    container.add(bgGfx)
+    
+    // Draw rounded shape
+    const drawBg = (boxAlpha, strokeAlpha) => {
+        bgGfx.clear()
+        bgGfx.fillStyle(colourInt, boxAlpha)
+        bgGfx.fillRoundedRect(-45, -20, 90, 40, 12)
+        bgGfx.lineStyle(2, colourInt, strokeAlpha)
+        bgGfx.strokeRoundedRect(-45, -20, 90, 40, 12)
+    }
+    drawBg(0.15, 0.4)
 
-    const text = this.add.text(x, y, label, {
+    const hitArea = new Phaser.Geom.Rectangle(-45, -20, 90, 40)
+    container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains)
+    container.input.cursor = 'pointer'
+
+    const text = this.add.text(0, 0, label, {
       fontFamily: 'Georgia, serif',
-      fontSize: '14px',
+      fontSize: '15px',
       color: colour,
     }).setOrigin(0.5)
+    container.add(text)
 
-    const btnState = { selected: false, bg, text, colour, colourInt, key }
+    const btnState = { selected: false, bg: container, text, colour, colourInt, key }
 
-    bg.on('pointerdown', () => {
+    container.on('pointerdown', () => {
+      this.sound.play('pebble_place', { volume: 0.5 }) // Just in case they have sound!
       if (btnState.selected) {
         btnState.selected = false
         this.selectedElements = this.selectedElements.filter(e => e !== key)
-        bg.setFillStyle(colourInt, 0.12)
-        bg.setStrokeStyle(2, colourInt, 0.3)
+        drawBg(0.15, 0.4)
+        this.tweens.add({ targets: container, scale: 1, duration: 100 })
       } else if (this.selectedElements.length < 2) {
         btnState.selected = true
         this.selectedElements.push(key)
-        bg.setFillStyle(colourInt, 0.5)
-        bg.setStrokeStyle(2, colourInt, 1)
+        drawBg(0.4, 0.9)
+        this.tweens.add({ targets: container, scale: 1.1, duration: 100 })
       }
       this.onElementSelectionChanged()
     })
 
-    bg.on('pointerover', () => {
-      if (!btnState.selected) bg.setFillStyle(colourInt, 0.25)
+    container.on('pointerover', () => {
+      if (!btnState.selected) drawBg(0.25, 0.6)
+      this.tweens.add({ targets: container, scale: btnState.selected ? 1.15 : 1.05, duration: 100 })
     })
-    bg.on('pointerout', () => {
-      if (!btnState.selected) bg.setFillStyle(colourInt, 0.12)
+    
+    container.on('pointerout', () => {
+      if (!btnState.selected) drawBg(0.15, 0.4)
+      this.tweens.add({ targets: container, scale: btnState.selected ? 1.1 : 1, duration: 100 })
     })
 
     return btnState
@@ -271,38 +327,99 @@ export default class CreationScene extends Phaser.Scene {
 
   updateCreateButton() {
     const ready = this.selectedElements.length === 2
-    this.createButton.setColor(ready ? '#daa520' : '#333333')
-    this.createButton.removeInteractive()
+    
+    this.createBtnBg.clear()
+    if (ready) {
+      this.createBtnBg.fillStyle(0xdba12a, 0.8)
+      this.createBtnBg.fillRoundedRect(-100, -25, 200, 50, 25)
+      this.createBtnBg.lineStyle(2, 0xffd280, 1)
+      this.createBtnBg.strokeRoundedRect(-100, -25, 200, 50, 25)
+      this.createButton.setColor('#ffffff')
+    } else {
+      this.createBtnBg.fillStyle(0x333333, 0.4)
+      this.createBtnBg.fillRoundedRect(-100, -25, 200, 50, 25)
+      this.createBtnBg.lineStyle(2, 0x555555, 1)
+      this.createBtnBg.strokeRoundedRect(-100, -25, 200, 50, 25)
+      this.createButton.setColor('#888888')
+    }
+
+    this.createBtnContainer.removeInteractive()
+    if (this.readyPulseTween) this.readyPulseTween.stop()
 
     if (ready) {
-      this.createButton.setInteractive({ useHandCursor: true })
-      this.createButton.off('pointerdown')
-      this.createButton.on('pointerdown', () => this.launchWorld())
-      this.createButton.on('pointerover', () => this.createButton.setColor('#ffcc44'))
-      this.createButton.on('pointerout', () => this.createButton.setColor('#daa520'))
+      const cwHit = new Phaser.Geom.Rectangle(-100, -25, 200, 50)
+      this.createBtnContainer.setInteractive(cwHit, Phaser.Geom.Rectangle.Contains)
+      this.createBtnContainer.input.cursor = 'pointer'
+      this.createBtnContainer.off('pointerdown')
+      this.createBtnContainer.on('pointerdown', () => this.launchWorld())
+      
+      this.createBtnContainer.on('pointerover', () => {
+        this.tweens.add({ targets: this.createBtnContainer, scale: 1.1, duration: 150 })
+      })
+      this.createBtnContainer.on('pointerout', () => {
+        this.tweens.add({ targets: this.createBtnContainer, scale: 1, duration: 150 })
+      })
+      
+      this.readyPulseTween = this.tweens.add({
+        targets: this.createBtnContainer,
+        scale: 1.03,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      })
+    } else {
+        this.createBtnContainer.setScale(1)
+        this.createBtnContainer.off('pointerover')
+        this.createBtnContainer.off('pointerout')
     }
   }
 
   createSlider(x, y, width, onChange) {
     const container = this.add.container(x - width / 2, y)
-    const track = this.add.rectangle(width / 2, 0, width, 4, 0x333333)
+    
+    // Sleek rounded track
+    const trackGfx = this.add.graphics()
+    trackGfx.fillStyle(0x0f1115, 0.8)
+    trackGfx.fillRoundedRect(0, -3, width, 6, 3)
+    trackGfx.lineStyle(1, 0x4a5a5a, 0.5)
+    trackGfx.strokeRoundedRect(0, -3, width, 6, 3)
+    container.add(trackGfx)
+
+    // Interactive hit zone for the track
+    const track = this.add.rectangle(width / 2, 0, width, 20, 0x000000, 0)
     container.add(track)
 
-    const thumb = this.add.circle(width / 2, 0, 8, 0xc07a28)
+    // Shadow blob
+    const shadow = this.add.circle(0, 3, 10, 0x000000, 0.4) // initial pos will update
+    container.add(shadow)
+
+    // Thumb node
+    const thumb = this.add.circle(0, 0, 10, 0xe4b660)
+    thumb.setStrokeStyle(2, 0xffe280, 0.8)
     thumb.setInteractive({ useHandCursor: true, draggable: true })
     container.add(thumb)
+
+    const initialX = width / 2
+    thumb.x = initialX
+    shadow.x = initialX
 
     thumb.on('drag', (pointer, dragX) => {
       const clamped = Phaser.Math.Clamp(dragX, 0, width)
       thumb.x = clamped
+      shadow.x = clamped
       if (onChange) onChange(clamped / width)
     })
+    
+    thumb.on('pointerover', () => this.tweens.add({ targets: thumb, scale: 1.2, duration: 100 }))
+    thumb.on('pointerout', () => this.tweens.add({ targets: thumb, scale: 1, duration: 100 }))
 
     track.setInteractive({ useHandCursor: true })
     track.on('pointerdown', (pointer) => {
       const localX = pointer.x - container.x
       const clamped = Phaser.Math.Clamp(localX, 0, width)
       thumb.x = clamped
+      shadow.x = clamped
       if (onChange) onChange(clamped / width)
     })
 
@@ -312,14 +429,14 @@ export default class CreationScene extends Phaser.Scene {
   createTerrainSlider(x, y, leftLabel, rightLabel, key) {
     this.add.text(x - 130, y, leftLabel, {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#666666',
+      fontSize: '12px',
+      color: '#aaaaaa',
     }).setOrigin(1, 0.5)
 
     this.add.text(x + 130, y, rightLabel, {
       fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#666666',
+      fontSize: '12px',
+      color: '#aaaaaa',
     }).setOrigin(0, 0.5)
 
     this.createSlider(x, y, 200, (value) => {
