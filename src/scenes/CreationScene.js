@@ -242,7 +242,6 @@ export default class CreationScene extends Phaser.Scene {
     const btnState = { selected: false, bg: container, text, colour, colourInt, key }
 
     container.on('pointerdown', () => {
-      this.sound.play('pebble_place', { volume: 0.5 }) // Just in case they have sound!
       if (btnState.selected) {
         btnState.selected = false
         this.selectedElements = this.selectedElements.filter(e => e !== key)
