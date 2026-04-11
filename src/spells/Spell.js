@@ -133,9 +133,7 @@ export class BoltSpell extends Spell {
       }
     }
 
-    // Critters caught along the bolt's path take damage too. Sample a
-    // handful of points along the segment and hit anything inside a
-    // small radius. Cheap and effective given the short critter list.
+    // Critters caught along the bolt's path take damage too.
     if (scene.critters?.damageInRadius) {
       const samples = 6
       for (let i = 0; i <= samples; i++) {
@@ -146,7 +144,37 @@ export class BoltSpell extends Spell {
       }
     }
 
-    if (scene.addJuice) scene.addJuice('medium')
+    // Devastate enemy villages near the bolt impact. A god's bolt
+    // annihilates a village's population in a single strike; this is
+    // how you conquer on raid worlds.
+    if (scene.villages) {
+      const blastR = TILE_SIZE * 10
+      for (const v of scene.villages) {
+        if (v.team !== 'enemy' || v._destroyed) continue
+        const vdx = v.worldX - ex2
+        const vdy = v.worldY - ey2
+        if (vdx * vdx + vdy * vdy < blastR * blastR) {
+          v.population = Math.max(0, v.population - (COMBAT.spells.villagePopDrain || 500))
+          v.belief = 0
+          if (scene.showMessage) scene.showMessage(`${v.name} is devastated!`, 1200)
+        }
+      }
+    }
+
+    // Also kill all enemy combat units near the impact
+    if (scene.warDirector?.units) {
+      const killR = TILE_SIZE * 6
+      for (const u of scene.warDirector.units) {
+        if (!u.alive || u.team === 'home') continue
+        const udx = u.sprite.x - ex2
+        const udy = u.sprite.y - ey2
+        if (udx * udx + udy * udy < killR * killR) {
+          u.takeDamage(9999, null)
+        }
+      }
+    }
+
+    if (scene.addJuice) scene.addJuice('heavy')
     if (scene.ambience?.playMagic) scene.ambience.playMagic()
     return true
   }

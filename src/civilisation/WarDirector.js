@@ -1,4 +1,5 @@
 import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
+import { COMBAT } from '../combat/Combat.js'
 import CombatUnit from './CombatUnit.js'
 
 // WarDirector: the orchestrator for living battles on the home world.
@@ -125,14 +126,18 @@ export default class WarDirector {
         }
       }
 
-      // Also test hits against the god and the rival god
+      // Also test hits against the god and the rival god.
+      // Unit arrows deal a fixed low amount to gods (5 HP each, so
+      // it takes ~20 arrows to kill a god). This prevents mob-rushing
+      // from being the optimal strategy while still rewarding archers.
       if (p.dead) continue
+      const arrowGodDmg = COMBAT.god.arrowDamageToGod || 5
       const enemyGod = this.scene.enemyGod
       if (p.team === 'home' && enemyGod?.alive && enemyGod.sprite) {
         const dx = enemyGod.sprite.x - p.sprite.x
         const dy = (enemyGod.sprite.y - 12) - p.sprite.y
         if (dx * dx + dy * dy < 220) {
-          this.scene.damageEnemyGod(p.damage)
+          this.scene.damageEnemyGod(arrowGodDmg)
           p._retire()
           this.projectiles.splice(i, 1)
           continue
@@ -143,7 +148,7 @@ export default class WarDirector {
         const dx = godBody.x - p.sprite.x
         const dy = (godBody.y - 12) - p.sprite.y
         if (dx * dx + dy * dy < 220) {
-          this.scene.god.takeDamage(p.damage)
+          this.scene.god.takeDamage(arrowGodDmg)
           p._retire()
           this.projectiles.splice(i, 1)
           continue

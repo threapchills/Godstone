@@ -342,21 +342,39 @@ export default class God {
     if (!this.scene || !this.sprite) return
     const cx = this.sprite.x
     const cy = this.sprite.y - this.sprite.height * 0.4
-    const colours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100]
+    const colours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100, 0xbb0022, 0x770000]
+    // Fine mist
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2
-      const speed = 15 + Math.random() * 50
-      const p = this.scene.add.circle(cx, cy, 1.0 + Math.random() * 1.4, colours[i % colours.length], 0.85)
+      const speed = 20 + Math.random() * 70
+      const p = this.scene.add.circle(cx, cy, 1.2 + Math.random() * 1.8, colours[i % colours.length], 0.9)
         .setDepth(15)
       this.scene.tweens.add({
         targets: p,
-        x: cx + Math.cos(angle) * speed * 0.5,
-        y: cy + Math.sin(angle) * speed * 0.5 + 8,
+        x: cx + Math.cos(angle) * speed * 0.6,
+        y: cy + Math.sin(angle) * speed * 0.6 + 12,
         alpha: 0,
-        scale: 0.1,
-        duration: 280 + Math.random() * 200,
+        scale: 0.08,
+        duration: 320 + Math.random() * 280,
         ease: 'Quad.easeOut',
         onComplete: () => p.destroy(),
+      })
+    }
+    // Larger gore chunks that arc and fall
+    const goreColours = [0x880000, 0x660011, 0xaa1111, 0x550000]
+    for (let i = 0; i < Math.min(4, Math.floor(count / 3)); i++) {
+      const angle = -Math.PI * 0.3 + Math.random() * Math.PI * 0.6 - Math.PI * 0.5
+      const speed = 35 + Math.random() * 55
+      const chunk = this.scene.add.circle(cx, cy, 2.0 + Math.random() * 2.2, goreColours[i % goreColours.length], 0.9).setDepth(16)
+      this.scene.tweens.add({
+        targets: chunk,
+        x: cx + Math.cos(angle) * speed * 0.7,
+        y: cy + Math.sin(angle) * speed * 0.4 + 25,
+        alpha: 0,
+        scale: 0.12,
+        duration: 450 + Math.random() * 250,
+        ease: 'Quad.easeIn',
+        onComplete: () => chunk.destroy(),
       })
     }
   }

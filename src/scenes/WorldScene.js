@@ -1009,6 +1009,36 @@ export default class WorldScene extends Phaser.Scene {
     // War Director: raid cycle, combat unit ticking, arrow hit resolution
     if (this.warDirector) this.warDirector.update(dilatedDelta)
 
+    // God touch-kills: walking into enemy units obliterates them.
+    // A god is a god; mere mortals cannot withstand contact.
+    if (this.warDirector?.units && this.god?.sprite) {
+      const gx = this.god.sprite.x
+      const gy = this.god.sprite.y - 10
+      const touchR = 18
+      for (const u of this.warDirector.units) {
+        if (!u.alive || u.team === 'home') continue
+        const dx = u.sprite.x - gx
+        const dy = u.sprite.y - gy
+        if (dx * dx + dy * dy < touchR * touchR) {
+          u.takeDamage(9999, null) // instant kill
+        }
+      }
+    }
+    // Enemy god also touch-kills home units it walks through
+    if (this.enemyGod?.alive && this.enemyGod.sprite && this.warDirector?.units) {
+      const ex = this.enemyGod.sprite.x
+      const ey = this.enemyGod.sprite.y - 10
+      const touchR = 18
+      for (const u of this.warDirector.units) {
+        if (!u.alive || u.team === 'enemy') continue
+        const dx = u.sprite.x - ex
+        const dy = u.sprite.y - ey
+        if (dx * dx + dy * dy < touchR * touchR) {
+          u.takeDamage(9999, null)
+        }
+      }
+    }
+
     // Tick active fireballs spawned by the elemental burst spell. Lives
     // outside the WarDirector because spells aren't combat units; they
     // are short-lived projectiles that need their own collision and AOE
@@ -1722,6 +1752,18 @@ export default class WorldScene extends Phaser.Scene {
             this.damageEnemyGod(fb.damage * 1.5)
           }
         }
+        // Devastate enemy villages caught in the blast
+        if (this.villages) {
+          for (const v of this.villages) {
+            if (v.team !== 'enemy' || v._destroyed) continue
+            const vdx = v.worldX - fb.ball.x
+            const vdy = v.worldY - fb.ball.y
+            if (vdx * vdx + vdy * vdy < fb.radius * fb.radius * 1.5) {
+              v.population = Math.max(0, v.population - 200)
+              v.belief = Math.max(0, v.belief - 30)
+            }
+          }
+        }
         if (this.addJuice) this.addJuice('heavy')
         fb.ball.destroy()
         fb.glow.destroy()
@@ -1830,6 +1872,28 @@ export default class WorldScene extends Phaser.Scene {
   }
 
   respawnGod() {
+    // Gods only resurrect if they still have living followers in this world.
+    // Zero believers across all home villages = permanent god death.
+    const homeVillages = this.villages.filter(v => v.team === 'home' || !v.team)
+    const totalFollowers = homeVillages.reduce((sum, v) => sum + Math.floor(v.population), 0)
+    if (totalFollowers <= 0) {
+      this.addJuice('severe')
+      this.showMessage('Your followers are gone. The god fades into silence.', 5000)
+      // On raid worlds, return home with whatever statues were earned
+      if (this.params?.isRaid && this.portalHenge) {
+        this.time.delayedCall(3000, () => {
+          this._beginPortalReturn(this.portalHenge)
+        })
+      }
+      // On home world, this is game over; return to creation screen
+      if (!this.params?.isRaid) {
+        this.time.delayedCall(4000, () => {
+          this.scene.start('Creation')
+        })
+      }
+      return
+    }
+
     // Severe juice on death; the player should feel the snap.
     this.addJuice('severe')
 
@@ -1851,15 +1915,20 @@ export default class WorldScene extends Phaser.Scene {
       ease: 'Quad.easeOut',
     })
 
-    const home = this.villages[0]
-    if (home) {
-      this.god.sprite.x = home.worldX
-      this.god.sprite.y = home.worldY - TILE_SIZE * 5
+    // Respawn at the nearest living home village
+    let bestVillage = null
+    let bestPop = 0
+    for (const v of homeVillages) {
+      if (v.population > bestPop) { bestPop = v.population; bestVillage = v }
+    }
+    if (bestVillage) {
+      this.god.sprite.x = bestVillage.worldX
+      this.god.sprite.y = bestVillage.worldY - TILE_SIZE * 5
     } else {
       this.god.sprite.x = WORLD_WIDTH * TILE_SIZE / 2
       this.god.sprite.y = TILE_SIZE * 10
     }
     this.god.sprite.body.setVelocity(0, 0)
-    this.showMessage('Resurrected near the village')
+    this.showMessage(`Resurrected. ${totalFollowers} followers remain.`)
   }
 }

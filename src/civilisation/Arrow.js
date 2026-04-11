@@ -13,19 +13,26 @@ import { SOLID_TILES } from '../world/TileTypes.js'
 // WORLD_WIDTH, and terrain hits sample the worldGrid instead of a
 // rectangle wall list.
 
-const ARROW_SPEED = 520
+import { COMBAT } from '../combat/Combat.js'
+
 const ARROW_LIFE_MS = 2800
 const TRAIL_INTERVAL_MS = 35
-const MAX_TRAILS = 6
 
 export default class Arrow {
-  constructor(scene, x, y, angle, team, damage) {
+  // stage: the origin village/unit stage, controls speed and damage calibre
+  constructor(scene, x, y, angle, team, damage, stage) {
     this.scene = scene
     this.team = team
-    this.damage = damage
     this.dead = false
     this._trailTimer = 0
     this._life = ARROW_LIFE_MS
+
+    // Stage-calibrated arrow stats: higher stage = faster, deadlier
+    const calibre = COMBAT.arrowByStage[stage || 3] || COMBAT.arrowByStage[3]
+    this.damage = damage || calibre.damage
+    this._trailColour = team === 'enemy' ? 0xff6644 : calibre.trail
+    const speed = calibre.speed
+    const scale = calibre.size
 
     const key = 'combat-arrow'
     if (!scene.textures.exists(key)) {
@@ -33,7 +40,6 @@ export default class Arrow {
       c.width = 12
       c.height = 3
       const ctx = c.getContext('2d')
-      // Pale wooden shaft with a darker iron head
       ctx.fillStyle = '#d9c89a'
       ctx.fillRect(0, 1, 9, 1)
       ctx.fillStyle = '#9a7a44'
@@ -48,11 +54,11 @@ export default class Arrow {
     this.sprite.setOrigin(0.5, 0.5)
     this.sprite.setDepth(14)
     this.sprite.setRotation(angle)
+    this.sprite.setScale(scale)
 
-    this.vx = Math.cos(angle) * ARROW_SPEED
-    this.vy = Math.sin(angle) * ARROW_SPEED
+    this.vx = Math.cos(angle) * speed
+    this.vy = Math.sin(angle) * speed
 
-    // Arrow release sound: short procedural whoosh via Web Audio
     this._playShootSound()
   }
 
@@ -119,7 +125,7 @@ export default class Arrow {
   }
 
   _spawnTrail() {
-    const colour = this.team === 'enemy' ? 0xff9966 : 0xaaf0ee
+    const colour = this._trailColour || (this.team === 'enemy' ? 0xff9966 : 0xaaf0ee)
     const trail = this.scene.add.circle(this.sprite.x, this.sprite.y, 1.4, colour, 0.65)
       .setDepth(13)
       .setBlendMode(Phaser.BlendModes.ADD)

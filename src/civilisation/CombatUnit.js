@@ -127,21 +127,21 @@ export default class CombatUnit {
     if (!this.scene || !this.sprite) return
     const cx = this.sprite.x
     const cy = this.sprite.y - this.sprite.height * 0.5
-    const bloodColours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100]
+    const bloodColours = [0xaa0000, 0x880011, 0xcc1111, 0x660000, 0x991100, 0xbb0022, 0x770000]
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2
-      const speed = 20 + Math.random() * 60
+      const speed = 25 + Math.random() * 80
       const colour = bloodColours[i % bloodColours.length]
-      const size = 1.0 + Math.random() * 1.5
-      const p = this.scene.add.circle(cx, cy, size, colour, 0.9)
+      const size = 1.2 + Math.random() * 2.0
+      const p = this.scene.add.circle(cx, cy, size, colour, 0.95)
         .setDepth(15)
       this.scene.tweens.add({
         targets: p,
-        x: cx + Math.cos(angle) * speed * 0.5,
-        y: cy + Math.sin(angle) * speed * 0.5 + 8, // gravity pull
+        x: cx + Math.cos(angle) * speed * 0.6,
+        y: cy + Math.sin(angle) * speed * 0.6 + 12, // heavy gravity pull
         alpha: 0,
-        scale: 0.15,
-        duration: 300 + Math.random() * 250,
+        scale: 0.08,
+        duration: 350 + Math.random() * 300,
         ease: 'Quad.easeOut',
         onComplete: () => p.destroy(),
       })
@@ -150,16 +150,21 @@ export default class CombatUnit {
 
   _die() {
     this.alive = false
-    // Big blood burst on death
-    if (this.sprite) this._spawnBlood(10 + Math.floor(Math.random() * 6))
+    // GNARLY death explosion: massive blood burst, screen punch
     if (this.sprite) {
-      // Quick fade so the body stays visible for a beat
+      // Main blood burst: lots of particles for a visceral splatter
+      this._spawnBlood(18 + Math.floor(Math.random() * 10))
+      // Secondary gore: larger, slower chunks that arc and fall
+      this._spawnGoreChunks()
+    }
+    if (this.scene.addJuice) this.scene.addJuice('light')
+    if (this.sprite) {
       this.scene.tweens.add({
         targets: this.sprite,
         alpha: 0,
-        scaleX: 0.4,
-        scaleY: 0.4,
-        duration: 400,
+        scaleX: 0.3,
+        scaleY: 0.3,
+        duration: 300,
         onComplete: () => this.sprite && this.sprite.destroy(),
       })
     }
@@ -167,8 +172,37 @@ export default class CombatUnit {
       this.scene.tweens.add({
         targets: this._halo,
         alpha: 0,
-        duration: 350,
+        duration: 250,
         onComplete: () => this._halo && this._halo.destroy(),
+      })
+    }
+  }
+
+  // Larger gore particles that arc outward and fall with gravity;
+  // the gnarly counterpoint to the fine blood mist.
+  _spawnGoreChunks() {
+    if (!this.scene || !this.sprite) return
+    const cx = this.sprite.x
+    const cy = this.sprite.y - this.sprite.height * 0.4
+    const goreColours = [0x880000, 0x660011, 0xaa1111, 0x550000, 0x770022]
+    for (let i = 0; i < 6; i++) {
+      const angle = -Math.PI * 0.2 + Math.random() * Math.PI * 0.6 - Math.PI * 0.5
+      const speed = 40 + Math.random() * 70
+      const size = 2.0 + Math.random() * 2.5
+      const colour = goreColours[i % goreColours.length]
+      const chunk = this.scene.add.circle(cx, cy, size, colour, 0.9).setDepth(16)
+      // Arc upward then fall with gravity
+      const vx = Math.cos(angle) * speed
+      const vy = Math.sin(angle) * speed
+      this.scene.tweens.add({
+        targets: chunk,
+        x: cx + vx * 0.8,
+        y: cy + vy * 0.4 + 30, // settles downward
+        alpha: 0,
+        scale: 0.15,
+        duration: 500 + Math.random() * 300,
+        ease: 'Quad.easeIn',
+        onComplete: () => chunk.destroy(),
       })
     }
   }
@@ -254,7 +288,7 @@ export default class CombatUnit {
             (target.sprite.y - 12) - (this.sprite.y - 12),
             target.sprite.x - this.sprite.x
           )
-          const a = new Arrow(this.scene, this.sprite.x, this.sprite.y - 12, angle, this.team, this.rangedDamage)
+          const a = new Arrow(this.scene, this.sprite.x, this.sprite.y - 12, angle, this.team, this.rangedDamage, this.stage)
           projectiles.push(a)
         }
       } else if (distToTarget < MELEE_RANGE) {
