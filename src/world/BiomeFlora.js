@@ -221,7 +221,7 @@ export default class BiomeFlora {
           break // one per column underground so caves don't get clogged
         }
       }
-      if (placed >= MAX_FLORA) break
+      if (placed >= maxFlora) break
     }
   }
 
