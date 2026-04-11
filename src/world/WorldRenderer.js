@@ -260,36 +260,63 @@ export function createTilesetTexture(scene, params) {
       const data = imgData.data
       const noiseSeed = baseId * 17 + mask * 31
 
+      // Count exposed edges; tiles with 2+ exposed sides get extra-heavy
+      // corner nibbling so the square corners dissolve completely.
+      const exposedCount = (hasTop ? 1 : 0) + (hasBottom ? 1 : 0) + (hasLeft ? 1 : 0) + (hasRight ? 1 : 0)
+
       for (let y = 0; y < TILE_SIZE; y++) {
         for (let x = 0; x < TILE_SIZE; x++) {
           const i = (y * TILE_SIZE + x) * 4
 
-          // Distance from each exposed edge (in pixels)
+          // Distance from each exposed edge
           let minDist = TILE_SIZE
           if (hasTop) minDist = Math.min(minDist, y)
           if (hasBottom) minDist = Math.min(minDist, TILE_SIZE - 1 - y)
           if (hasLeft) minDist = Math.min(minDist, x)
           if (hasRight) minDist = Math.min(minDist, TILE_SIZE - 1 - x)
 
-          if (minDist >= 4) continue // interior pixel, keep solid
+          // For corner tiles (2+ exposed sides), also measure diagonal
+          // distance so the corner melts away into a rounded shape.
+          if (exposedCount >= 2) {
+            if (hasTop && hasLeft) {
+              const cornerDist = Math.sqrt(x * x + y * y) * 0.85
+              minDist = Math.min(minDist, cornerDist)
+            }
+            if (hasTop && hasRight) {
+              const dx = TILE_SIZE - 1 - x
+              const cornerDist = Math.sqrt(dx * dx + y * y) * 0.85
+              minDist = Math.min(minDist, cornerDist)
+            }
+            if (hasBottom && hasLeft) {
+              const dy = TILE_SIZE - 1 - y
+              const cornerDist = Math.sqrt(x * x + dy * dy) * 0.85
+              minDist = Math.min(minDist, cornerDist)
+            }
+            if (hasBottom && hasRight) {
+              const dx = TILE_SIZE - 1 - x
+              const dy = TILE_SIZE - 1 - y
+              const cornerDist = Math.sqrt(dx * dx + dy * dy) * 0.85
+              minDist = Math.min(minDist, cornerDist)
+            }
+          }
 
-          // Noise-driven threshold: pixels closer to exposed edges
-          // have a higher chance of being cleared. The noise creates
-          // irregular, organic shapes instead of uniform fade.
+          // Nibble reaches deep: up to 6px into the 8px tile.
+          // Only the innermost 2px core is always safe.
+          if (minDist >= 6) continue
+
           const n = edgeNoise(x, y, noiseSeed)
 
-          // Aggressive nibble: clear 0-3px from edge with noise variation.
-          // The threshold curve determines the edge profile:
-          //   dist 0: always clear (100% transparent)
-          //   dist 1: clear if noise > 0.2 (80% chance)
-          //   dist 2: clear if noise > 0.5 (50% chance)
-          //   dist 3: clear if noise > 0.75 (25% chance)
-          const threshold = minDist / 4
+          // Very aggressive threshold curve so edges are truly ragged:
+          //   dist 0:   always clear
+          //   dist 1:   clear 90% of the time
+          //   dist 2-3: clear 60-40%
+          //   dist 4-5: clear 20-10% (noise-dependent tendrils)
+          const threshold = (minDist / 6) * 0.65 + 0.05
           if (n > threshold) {
-            data[i + 3] = 0 // fully transparent
-          } else if (minDist <= 1) {
-            // Soft fade for the innermost surviving pixels
-            data[i + 3] = Math.floor(data[i + 3] * 0.5)
+            data[i + 3] = 0
+          } else if (minDist <= 2) {
+            // Soft semi-transparent fringe on surviving edge pixels
+            data[i + 3] = Math.floor(data[i + 3] * (0.3 + minDist * 0.2))
           }
         }
       }
