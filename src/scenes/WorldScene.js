@@ -1533,6 +1533,10 @@ export default class WorldScene extends Phaser.Scene {
       barrenFertile: 0.4 + Math.random() * 0.3,
       sparseDense: 0.3 + Math.random() * 0.4,
       isRaid: true,
+      // Carry the player's god appearance into the raid world
+      godHead: this.params.godHead,
+      godBody: this.params.godBody,
+      godLegs: this.params.godLegs,
     }
 
     // Restart the scene with raid params; Phaser handles full teardown

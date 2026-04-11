@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { GAME_WIDTH, GAME_HEIGHT } from '../core/Constants.js'
 import { SKY_VARIANTS } from '../world/AssetVariants.js'
+import { ALL_GOD_PARTS } from '../god/GodPartManifest.js'
 
 // Atmospheric loading tips that cycle while assets load and world generates.
 const TIPS = [
@@ -58,6 +59,11 @@ export default class BootScene extends Phaser.Scene {
     // Sky variant paintings
     for (const key of SKY_VARIANTS) {
       this.load.image(`skyvar_${key}`, `assets/backgrounds/sky-variants/${key}.png`)
+    }
+
+    // Modular god part assets (heads, bodies, legs per element)
+    for (const part of ALL_GOD_PARTS) {
+      this.load.image(part.key, part.path)
     }
 
     // Track loading progress

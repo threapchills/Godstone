@@ -448,7 +448,7 @@ export default class CreationScene extends Phaser.Scene {
   }
 
   launchWorld() {
-    this.scene.start('World', {
+    this.scene.start('GodCreation', {
       params: {
         element1: this.selectedElements[0],
         element2: this.selectedElements[1],

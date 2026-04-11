@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { GAME_WIDTH, GAME_HEIGHT } from './core/Constants.js'
 import BootScene from './scenes/BootScene.js'
 import CreationScene from './scenes/CreationScene.js'
+import GodCreationScene from './scenes/GodCreationScene.js'
 import WorldScene from './scenes/WorldScene.js'
 
 const config = {
@@ -21,7 +22,7 @@ const config = {
       debug: false,
     },
   },
-  scene: [BootScene, CreationScene, WorldScene],
+  scene: [BootScene, CreationScene, GodCreationScene, WorldScene],
   pixelArt: true,
   roundPixels: true,
 }

@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { TILE_SIZE, GOD_SPEED, GOD_JUMP, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT } from '../core/Constants.js'
 import { TILES, LIQUID_TILES, SOLID_TILES } from '../world/TileTypes.js'
 import { createGodTexture, GOD_W, GOD_H } from './GodRenderer.js'
+import { compositeGod, COMPOSITE_W, COMPOSITE_H, GOD_DISPLAY_SCALE } from './GodCompositor.js'
 import { COMBAT } from '../combat/Combat.js'
 
 const FLAP_IMPULSE = -220       // upward burst per space press
@@ -20,8 +21,16 @@ export default class God {
     // Physics: hitbox smaller than visual for forgiving collisions
     scene.physics.add.existing(this.sprite)
     this.sprite.body.setGravityY(GRAVITY)
-    this.sprite.body.setSize(14, 24)
-    this.sprite.body.setOffset(5, 8)
+    if (this._useComposite) {
+      // Composite is 128x192 at GOD_DISPLAY_SCALE (~0.085).
+      // Effective on-screen: ~11x16px. Hitbox needs to be defined
+      // in source-texture coordinates so Phaser scales it automatically.
+      this.sprite.body.setSize(80, 160)
+      this.sprite.body.setOffset(24, 28)
+    } else {
+      this.sprite.body.setSize(14, 24)
+      this.sprite.body.setOffset(5, 8)
+    }
     this.sprite.body.setCollideWorldBounds(false)
     this.sprite.body.setBounce(0)
     this.sprite.body.setMaxVelocityY(500)
@@ -66,11 +75,24 @@ export default class God {
   }
 
   createSprite(scene, x, y, params) {
-    const { key } = createGodTexture(scene, params)
-    this.sprite = scene.add.sprite(x, y, key)
-    this.sprite.setOrigin(0.5, 1)
-    this.sprite.setScale(0.5) // human-sized relative to 8px tiles
-    this.sprite.setDepth(10)
+    // Use modular composite if god parts were chosen on the creation screen;
+    // otherwise fall back to the procedural canvas renderer.
+    if (params.godHead && params.godBody && params.godLegs) {
+      const uniqueId = `player-${params.seed || 0}`
+      const { key } = compositeGod(scene, params.godHead, params.godBody, params.godLegs, uniqueId)
+      this.sprite = scene.add.sprite(x, y, key)
+      this.sprite.setOrigin(0.5, 1)
+      this.sprite.setScale(GOD_DISPLAY_SCALE)
+      this.sprite.setDepth(10)
+      this._useComposite = true
+    } else {
+      const { key } = createGodTexture(scene, params)
+      this.sprite = scene.add.sprite(x, y, key)
+      this.sprite.setOrigin(0.5, 1)
+      this.sprite.setScale(0.5)
+      this.sprite.setDepth(10)
+      this._useComposite = false
+    }
   }
 
   update(worldGrid, time, delta = 16) {

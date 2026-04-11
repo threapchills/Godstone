@@ -3,6 +3,8 @@ import { TILE_SIZE, GRAVITY, WORLD_WIDTH, WORLD_HEIGHT, ELEMENTS, ELEMENT_PAIRS 
 import { SOLID_TILES } from '../world/TileTypes.js'
 import { COMBAT } from './Combat.js'
 import { createGodTexture, GOD_W, GOD_H } from '../god/GodRenderer.js'
+import { compositeGod, COMPOSITE_W, COMPOSITE_H, GOD_DISPLAY_SCALE } from '../god/GodCompositor.js'
+import { GOD_PARTS } from '../god/GodPartManifest.js'
 
 // A roaming rival deity. Walks, jumps, lifts off when blocked or when
 // the player is far above. AI is a tiny state machine: WANDER → SEEK
@@ -38,25 +40,84 @@ export default class EnemyGod {
   }
 
   _buildSprite(scene, x, y) {
-    // Pick a random element pair for this rival god's appearance
-    const pair = ELEMENT_PAIRS[this.enemySeed % ELEMENT_PAIRS.length]
-    const enemyParams = {
-      seed: this.enemySeed,
-      element1: pair[0],
-      element2: pair[1],
-      elementRatio: 3 + (this.enemySeed % 5), // 3-7 for variety
+    // Seeded RNG for deterministic random assembly per enemy
+    const seed = this.enemySeed
+    let s = seed
+    const rng = () => {
+      s |= 0; s = (s + 0x6d2b79f5) | 0
+      let t = Math.imul(s ^ (s >>> 15), 1 | s)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
-    const { key } = createGodTexture(scene, enemyParams)
-    this.sprite = scene.add.sprite(x, y, key)
-    this.sprite.setOrigin(0.5, 1)
-    this.sprite.setDepth(11)
-    // Red tint overlay so it reads as hostile at a glance
-    this.sprite.setTint(0xff8888)
-    scene.physics.add.existing(this.sprite)
-    this.sprite.body.setGravityY(GRAVITY)
-    this.sprite.body.setSize(14, 24)
-    this.sprite.body.setOffset(5, 8)
-    this.sprite.body.setMaxVelocityY(500)
+
+    // Randomly pick head, body, legs from the full asset pool
+    const headPool = GOD_PARTS.heads
+    const bodyPool = GOD_PARTS.bodies
+    const legsPool = GOD_PARTS.legs
+    const headEntry = headPool[Math.floor(rng() * headPool.length)]
+    const bodyEntry = bodyPool[Math.floor(rng() * bodyPool.length)]
+    const legsEntry = legsPool[Math.floor(rng() * legsPool.length)]
+
+    // Check if the composite assets are loaded; fall back to procedural if not
+    const assetsLoaded = scene.textures.exists(headEntry.key) &&
+                         scene.textures.exists(bodyEntry.key) &&
+                         scene.textures.exists(legsEntry.key)
+
+    if (assetsLoaded) {
+      // Element-based hue shift so the enemy reads as elementally distinct.
+      // Fire enemies stay warm, water enemies shift cool, air enemies go pale.
+      const pair = ELEMENT_PAIRS[seed % ELEMENT_PAIRS.length]
+      const hueShifts = { fire: 0, water: 160, air: 200, earth: 80 }
+      const baseHue = hueShifts[pair[0]] || 0
+      const jitter = (rng() - 0.5) * 40
+
+      const uniqueId = `enemy-${seed}`
+      const { key } = compositeGod(
+        scene, headEntry.key, bodyEntry.key, legsEntry.key,
+        uniqueId, { hueShift: baseHue + jitter }
+      )
+
+      this.sprite = scene.add.sprite(x, y, key)
+      this.sprite.setOrigin(0.5, 1)
+      this.sprite.setScale(GOD_DISPLAY_SCALE)
+      this.sprite.setDepth(11)
+      // Subtle hostile tint (less aggressive than the old 0xff8888)
+      this.sprite.setTint(0xffbbbb)
+
+      // Elemental glow aura: same texture, slightly larger, additive blend
+      const glowColours = { fire: 0xff4422, water: 0x2288ff, air: 0xaaccff, earth: 0x66aa33 }
+      const glowColour = glowColours[pair[0]] || 0xff6644
+      this._glowSprite = scene.add.sprite(x, y, key)
+      this._glowSprite.setOrigin(0.5, 1)
+      this._glowSprite.setScale(GOD_DISPLAY_SCALE * 1.18)
+      this._glowSprite.setDepth(10) // behind the main sprite
+      this._glowSprite.setTint(glowColour)
+      this._glowSprite.setAlpha(0.25)
+      this._glowSprite.setBlendMode(Phaser.BlendModes.ADD)
+
+      scene.physics.add.existing(this.sprite)
+      this.sprite.body.setGravityY(GRAVITY)
+      this.sprite.body.setSize(80, 160)
+      this.sprite.body.setOffset(24, 28)
+      this.sprite.body.setMaxVelocityY(500)
+    } else {
+      // Fallback: procedural canvas god (pre-composite assets not available)
+      const pair = ELEMENT_PAIRS[seed % ELEMENT_PAIRS.length]
+      const enemyParams = {
+        seed, element1: pair[0], element2: pair[1],
+        elementRatio: 3 + (seed % 5),
+      }
+      const { key } = createGodTexture(scene, enemyParams)
+      this.sprite = scene.add.sprite(x, y, key)
+      this.sprite.setOrigin(0.5, 1)
+      this.sprite.setDepth(11)
+      this.sprite.setTint(0xff8888)
+      scene.physics.add.existing(this.sprite)
+      this.sprite.body.setGravityY(GRAVITY)
+      this.sprite.body.setSize(14, 24)
+      this.sprite.body.setOffset(5, 8)
+      this.sprite.body.setMaxVelocityY(500)
+    }
   }
 
   _buildHpBar(scene) {
@@ -145,9 +206,6 @@ export default class EnemyGod {
 
   _die() {
     this.alive = false
-    // Epic juice: impact-frame freeze, punch-in zoom, extreme slowmo.
-    // Killing a rival god is the biggest moment in a home-world session;
-    // the camera should stop the world and show you the moment.
     if (this.scene.addJuice) this.scene.addJuice('epic')
     if (this.scene.showMessage) this.scene.showMessage('A rival god falls', 2200)
     if (this.scene.ambience?.playGong) this.scene.ambience.playGong()
@@ -161,6 +219,13 @@ export default class EnemyGod {
         onComplete: () => this.destroy(),
       })
     }
+    // Fade out the glow aura in sync with the main sprite
+    if (this._glowSprite) {
+      this.scene.tweens.add({
+        targets: this._glowSprite,
+        alpha: 0, duration: 500,
+      })
+    }
   }
 
   destroy() {
@@ -171,6 +236,10 @@ export default class EnemyGod {
     if (this.hpBar) {
       this.hpBar.destroy()
       this.hpBar = null
+    }
+    if (this._glowSprite) {
+      this._glowSprite.destroy()
+      this._glowSprite = null
     }
   }
 
@@ -238,6 +307,13 @@ export default class EnemyGod {
     }
 
     this._updateHpBar()
+
+    // Sync the glow aura sprite to follow the main sprite
+    if (this._glowSprite && this.sprite) {
+      this._glowSprite.x = this.sprite.x
+      this._glowSprite.y = this.sprite.y
+      this._glowSprite.setFlipX(this.sprite.flipX)
+    }
   }
 
   _wander(body, onGround) {
