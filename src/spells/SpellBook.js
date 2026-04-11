@@ -1,43 +1,36 @@
-import { BoltSpell, PlaceSpell, GeasSpell, ElementalBurstSpell } from './Spell.js'
+import { selectSpells } from './Spell.js'
 
-// The player's spell loadout, with progressive unlocks tied to total
-// tablets ever picked up. Owns the active selection, dispatches casts,
-// and ticks down per-spell cooldowns.
-//
-// Slot order: bolt → elemental burst → place → geas. Bolt is the first
-// gift; the elemental burst is the second, biggest, and the spell that
-// makes the world's element matter mechanically; place and geas are
-// the utility / soft-power tail.
+// The god's spell loadout: 3 spells selected by element pair + ratio.
+// Slot 1 (offensive) available from start, Slot 2 (tactical) at 3
+// tablets, Slot 3 (ultimate) at 5 tablets. Cooldowns are fixed by
+// slot: 1.2s / 4s / 10s. All spells cost 1 mana.
 
-const UNLOCK_ORDER = ['bolt', 'burst', 'place', 'geas']
+const SLOT_COOLDOWNS = [1200, 4000, 10000]
+const UNLOCK_THRESHOLDS = [0, 3, 5] // tablets needed per slot
 
 export default class SpellBook {
   constructor(params) {
     this.params = params
-    // Build all four spells up front; the unlock check just gates which
-    // are usable at any given moment.
-    this.allSpells = {
-      bolt: new BoltSpell(),
-      burst: new ElementalBurstSpell(params.element1),
-      place: new PlaceSpell(params.element1),
-      geas: new GeasSpell(),
-    }
-    this.unlockedCount = 0 // updated each frame from God.highestTablet
+    // Element-driven spell selection
+    this.spells = selectSpells(params.element1, params.element2, params.elementRatio)
+    // Override cooldowns by slot position
+    this.spells.forEach((s, i) => { s.cooldown = SLOT_COOLDOWNS[i] })
+    this.unlockedCount = 1
     this.activeIndex = 0
   }
 
-  // unlockCount: how many slots are visible. Derived from the god's
-  // highest tablet level (since tablets are persistent and incremental):
-  // 0 = none, 1 = bolt, 2 = +burst, 3 = +place, 4+ = full loadout.
   setUnlockCount(highestTablet) {
-    this.unlockedCount = Math.min(4, highestTablet)
+    let count = 0
+    for (let i = 0; i < 3; i++) {
+      if (highestTablet >= UNLOCK_THRESHOLDS[i]) count = i + 1
+    }
+    this.unlockedCount = count
   }
 
   unlockedSpells() {
-    return UNLOCK_ORDER.slice(0, this.unlockedCount).map(k => this.allSpells[k])
+    return this.spells.slice(0, this.unlockedCount)
   }
 
-  // Returns the active spell, or null if no spells are unlocked.
   active() {
     const list = this.unlockedSpells()
     if (list.length === 0) return null
@@ -50,9 +43,12 @@ export default class SpellBook {
     this.activeIndex = ((this.activeIndex + direction) % n + n) % n
   }
 
-  // Try to cast the active spell at the given world coordinates.
-  // Returns true on success. Casts cost mana from the god; an empty
-  // pool blocks the cast and surfaces a hint.
+  select(index) {
+    if (index >= 0 && index < this.unlockedCount) {
+      this.activeIndex = index
+    }
+  }
+
   cast(scene, targetX, targetY) {
     const spell = this.active()
     if (!spell) return false
@@ -71,8 +67,7 @@ export default class SpellBook {
   }
 
   update(delta) {
-    for (const key of UNLOCK_ORDER) {
-      const sp = this.allSpells[key]
+    for (const sp of this.spells) {
       if (sp.cooldownRemaining > 0) {
         sp.cooldownRemaining = Math.max(0, sp.cooldownRemaining - delta)
       }

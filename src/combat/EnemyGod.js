@@ -5,12 +5,11 @@ import { COMBAT } from './Combat.js'
 import { createGodTexture, GOD_W, GOD_H } from '../god/GodRenderer.js'
 import { compositeGod, COMPOSITE_W, COMPOSITE_H, GOD_DISPLAY_SCALE } from '../god/GodCompositor.js'
 import { GOD_PARTS } from '../god/GodPartManifest.js'
+import SpellBook from '../spells/SpellBook.js'
 
-// A roaming rival deity. Walks, jumps, lifts off when blocked or when
-// the player is far above. AI is a tiny state machine: WANDER → SEEK
-// → ENGAGE → FLEE, with FLEE returning to WANDER once distance is
-// restored. The shadow bolt is the only attack for v1; melee is left
-// to whatever bodyguards engage in close quarters.
+// A roaming rival deity with its own SpellBook using the same spell
+// system as the player. AI state machine: WANDER → SEEK → ENGAGE →
+// FLEE. All 3 spells unlocked from start (established deity).
 
 const STATE = { WANDER: 'wander', SEEK: 'seek', ENGAGE: 'engage', FLEE: 'flee' }
 
@@ -24,7 +23,6 @@ export default class EnemyGod {
     this.maxMana = COMBAT.enemyGod.maxMana
     this.mana = this.maxMana
     this.state = STATE.WANDER
-    this._lastBoltTime = 0
     this._lastJumpTime = 0
     this._wanderTarget = x
     this._stuckTimer = 0
@@ -32,6 +30,15 @@ export default class EnemyGod {
     this._lastY = y
     this._isFlying = false
     this.alive = true
+    this.team = 'enemy'
+
+    // SpellBook: same system as the player god, all 3 unlocked
+    const pair = ELEMENT_PAIRS[(enemySeed || 0) % ELEMENT_PAIRS.length]
+    const ratio = 3 + ((enemySeed || 0) % 5) // 3-7
+    this.spellBook = new SpellBook({
+      element1: pair[0], element2: pair[1], elementRatio: ratio,
+    })
+    this.spellBook.setUnlockCount(7) // fully unlocked
 
     // Randomly generated appearance each time
     this.enemySeed = enemySeed ?? Math.floor(Math.random() * 999999)
@@ -263,6 +270,9 @@ export default class EnemyGod {
     }
     this._lastY = this.sprite.y
 
+    // Tick spell cooldowns
+    if (this.spellBook) this.spellBook.update(delta)
+
     // Stuck detection: if barely moved while trying to seek, lift off
     if (Math.abs(this.sprite.x - this._lastX) < 0.5) {
       this._stuckTimer += delta
@@ -353,72 +363,57 @@ export default class EnemyGod {
   }
 
   _engage(body, onGround, dx, dy, dist, godSprite) {
-    // Hold position with small lateral adjustments and lob bolts
     const dir = Math.sign(dx)
     body.setVelocityX(dir * COMBAT.enemyGod.speed * 0.3)
     this.sprite.setFlipX(dir < 0)
 
-    // Bolts gated by both cooldown and mana. Out of mana means the
-    // rival has to back off or wait until movement refills the pool;
-    // wandering between engagements naturally tops it up.
-    const now = this.scene.time.now
-    const cooldownReady = now - this._lastBoltTime > COMBAT.enemyGod.boltCooldown
-    const manaReady = this.mana >= COMBAT.enemyGod.boltManaCost
-    if (cooldownReady && manaReady) {
-      this._lastBoltTime = now
-      this.mana = Math.max(0, this.mana - COMBAT.enemyGod.boltManaCost)
-      this._fireBolt(godSprite)
+    if (!this.spellBook || this.mana < 1) return
+
+    // AI spell priority: ultimate > tactical > offensive
+    // Try highest-impact spell first, fall back to workhorse
+    const target = godSprite
+    const tx = target.x + (Math.random() - 0.5) * 8 // slight aim jitter
+    const ty = target.y - TILE_SIZE
+
+    // Temporarily set the scene's god reference for enemy spell casting
+    // (spells check scene.god for source position)
+    const realGod = this.scene.god
+    const fakeGod = {
+      sprite: this.sprite,
+      hp: this.hp, maxHp: this.maxHp,
+      mana: this.mana, maxMana: this.maxMana,
+      team: 'enemy',
     }
+    this.scene.god = fakeGod
+
+    // Try Slot 3 (ultimate) first, then 2 (tactical), then 1 (offensive)
+    let cast = false
+    for (let slot = 2; slot >= 0; slot--) {
+      this.spellBook.select(slot)
+      const spell = this.spellBook.active()
+      if (spell && spell.cooldownRemaining <= 0 && this.mana >= spell.manaCost) {
+        if (this.spellBook.cast(this.scene, tx, ty)) {
+          this.mana = Math.max(0, this.mana - spell.manaCost)
+          cast = true
+          break
+        }
+      }
+    }
+
+    // Restore real god
+    this.scene.god = realGod
+
+    // Tick spell cooldowns
+    this.spellBook.update(0)
   }
 
   _flee(body, onGround, dx, dy) {
-    // Run away from the player
     const dir = -Math.sign(dx)
     body.setVelocityX(dir * COMBAT.enemyGod.speed * 1.1)
     this.sprite.setFlipX(dir < 0)
     if (onGround && (body.blocked.left || body.blocked.right)) {
       body.setVelocityY(COMBAT.enemyGod.jumpVelocity)
     }
-    // Heal slowly while fleeing so the loop has a recovery beat
     this.hp = Math.min(this.maxHp, this.hp + 0.05)
-  }
-
-  _fireBolt(targetSprite) {
-    if (!this.scene || !targetSprite) return
-    const sx = this.sprite.x
-    const sy = this.sprite.y - TILE_SIZE
-    const tx = targetSprite.x
-    const ty = targetSprite.y - TILE_SIZE
-    const dx = tx - sx
-    const dy = ty - sy
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist < 2) return
-    const ux = dx / dist
-    const uy = dy / dist
-    const reach = Math.min(dist, COMBAT.enemyGod.boltRange)
-    const ex = sx + ux * reach
-    const ey = sy + uy * reach
-
-    const line = this.scene.add.line(0, 0, sx, sy, ex, ey, 0xff3322, 1)
-      .setLineWidth(2)
-      .setOrigin(0, 0)
-      .setDepth(20)
-      .setBlendMode(Phaser.BlendModes.ADD)
-    this.scene.tweens.add({
-      targets: line,
-      alpha: 0,
-      duration: 280,
-      onComplete: () => line.destroy(),
-    })
-
-    // Hit check: if the player is within the bolt path, deal damage
-    if (reach >= dist - 6) {
-      // Direct line-of-sight hit
-      if (this.scene.god?.takeDamage) {
-        this.scene.god.takeDamage(COMBAT.enemyGod.boltDamage)
-      } else if (this.scene.applyGodDamage) {
-        this.scene.applyGodDamage(COMBAT.enemyGod.boltDamage)
-      }
-    }
   }
 }
