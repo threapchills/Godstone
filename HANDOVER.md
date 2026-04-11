@@ -78,19 +78,27 @@ The rule this session is different from the usual "one step at a time": Mike sai
 
 ### Known follow-ups for the next session
 
-- **Combat system overhaul (Mike's request).** Current raid combat uses population drain on proximity. Needs to be upgraded to:
-  - Full arrow-based battles with calibre/speed based on village stage
-  - Arrow collision detection with blood effects on death
-  - Gods destroy units on touch (not ranged)
-  - God spells one-shot other gods or entire villages
-  - Unit arrows damage opposing gods at 5 HP each (20 arrows to kill)
-  - Gods only resurrect if they still have living followers on that world
-  - Pattern: emulate Sky Baby's visceral combat feel (SOAR/ reference)
-  - Blood effects need to be "GNARLY" per Mike's explicit direction
-- **HUD scaling under camera zoom.** HUD text elements still scale with zoom. A dedicated Phaser UI camera would fix this properly.
-- **Tablet inventory widget** still shows 7 slots. Should expand dynamically to match total tablets collected.
+- **FULL GRAPHICS OVERHAUL (priority).** Replace all procedural pixel-art with storybook illustration assets. The goal: eliminate the blocky Minecraft aesthetic entirely. Every visual element should use a dedicated sprite from `public/assets/storybook_overhaul/`. Key principles:
+  - **Use ALL assets** in the storybook_overhaul folder; nothing should go unused
+  - **Procedural hue shifts** depending on world element settings (fire=warm, water=cool, etc.) so the same sprite reads differently per biome
+  - **Modular architecture** so new sprites can be dropped in and picked up automatically; more assets are coming
+  - **Asset mapping** (what replaces what):
+    - Terrain tiles: grass_block, dirt_block, cave_block, lava_block, desert_block, snow_block, deep_water, water_surface, grass_ledge_left/right → replace canvas-drawn tileset
+    - Trees/flora: tree_ancient, pine_tree, dead_tree, bushes, giant_mushrooms, stalactite, mossy_boulder, rocks, giant_crystals → replace procedural FoliageRenderer and BiomeFlora sprites
+    - Structures: teepee, fireplace, chest, loot_crate, totem, signpost, stone_altar, wooden_bridge, dungeon_door, canoe, wooden_barrel, anvil → replace canvas-drawn Village buildings
+    - Villagers: villager_1-4 → replace WanderingWarrior procedural sprites
+    - Warriors: warrior_base → replace CombatUnit procedural sprites
+    - Critters: stag_deer, bear, eagle, aquatic_fish, pig, pet_cloud → replace canvas-drawn Critter sprites
+    - NPCs: traveling_merchant, royal_character, hooded_mystic, elemental_spirit, undead_warrior → new NPC types for villages/encounters
+    - Spells: fireball_spell, lightning_bolt, icicle_projectile, heal_aura, shield_bubble, magic_runes, star_particles, boulder_projectile, sword_slash, dark_smoke → replace procedural spell visuals
+    - Projectiles: arrow_projectile → replace canvas-drawn Arrow sprite
+    - Background: distant_mountains, fluffy_clouds (already used in Boot/Creation scenes)
+    - God parts: procedural_gods/ heads/bodies/legs (already integrated via GodCompositor)
+  - **God creation system already done** (GodCompositor + GodCreationScene). Pattern to follow for other systems.
+  - Combat system overhaul also shipped this session (stage-calibrated arrows, touch-kills, gnarly blood, resurrection gating).
+- **HUD scaling under camera zoom.** A dedicated Phaser UI camera would fix this properly.
+- **Tablet inventory widget** still shows 7 slots. Should expand dynamically.
 - **Rain rate** tuned for visual presence; Mike may want to adjust.
-- **Tree variant PNGs need proper transparency** before re-enabling.
 
 ## Where we are (pre-mission state)
 
