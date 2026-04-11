@@ -24,7 +24,8 @@ const config = {
   },
   scene: [BootScene, CreationScene, GodCreationScene, WorldScene],
   pixelArt: true,
-  roundPixels: true,
+  roundPixels: false,
+  antialias: true,
 }
 
 // Expose for dev/debug access

@@ -34,17 +34,15 @@ export default class Arrow {
     const speed = calibre.speed
     const scale = calibre.size
 
-    const key = 'combat-arrow'
-    if (!scene.textures.exists(key)) {
+    // Use storybook arrow sprite if available; fall back to canvas
+    const useSB = scene.textures.exists('sb_arrow_projectile')
+    const key = useSB ? 'sb_arrow_projectile' : 'combat-arrow'
+    if (!useSB && !scene.textures.exists(key)) {
       const c = document.createElement('canvas')
-      c.width = 12
-      c.height = 3
+      c.width = 12; c.height = 3
       const ctx = c.getContext('2d')
       ctx.fillStyle = '#d9c89a'
       ctx.fillRect(0, 1, 9, 1)
-      ctx.fillStyle = '#9a7a44'
-      ctx.fillRect(0, 0, 3, 1)
-      ctx.fillRect(0, 2, 3, 1)
       ctx.fillStyle = '#555555'
       ctx.fillRect(9, 0, 3, 3)
       scene.textures.addCanvas(key, c)
@@ -54,7 +52,14 @@ export default class Arrow {
     this.sprite.setOrigin(0.5, 0.5)
     this.sprite.setDepth(14)
     this.sprite.setRotation(angle)
-    this.sprite.setScale(scale)
+    // Scale storybook arrow to match the 8px-tile world
+    if (useSB) {
+      const srcH = this.sprite.height || 32
+      const targetH = 6 * scale
+      this.sprite.setScale(targetH / srcH)
+    } else {
+      this.sprite.setScale(scale)
+    }
 
     this.vx = Math.cos(angle) * speed
     this.vy = Math.sin(angle) * speed
@@ -66,6 +71,11 @@ export default class Arrow {
     try {
       const ambience = this.scene.ambience
       if (!ambience?.ctx) return
+      // Rate-limit arrow sounds so volleys don't stack into a wall of noise
+      const now = ambience.ctx.currentTime
+      if (!Arrow._lastSoundTime) Arrow._lastSoundTime = 0
+      if (now - Arrow._lastSoundTime < 0.12) return
+      Arrow._lastSoundTime = now
       const ctx = ambience.ctx
       // Short noise burst shaped as a whoosh
       const duration = 0.06

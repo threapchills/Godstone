@@ -27,7 +27,6 @@ export default class BootScene extends Phaser.Scene {
     // Mountains and clouds for the backdrop (small files, load fast)
     this.load.image('dist_mountains', 'assets/storybook_overhaul/distant_mountains.png')
     this.load.image('fluffy_clouds', 'assets/storybook_overhaul/fluffy_clouds.png')
-    this.load.image('sb_totem', 'assets/storybook_overhaul/totem.png')
     this.load.image('sb_magic_runes', 'assets/storybook_overhaul/magic_runes.png')
 
     // --- All game assets ---
@@ -42,19 +41,77 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('sb_teepee_green', 'assets/environment/teepee_green.png')
     this.load.image('leaf', 'assets/environment/leaf.png')
 
-    // Storybook overhaul sprites
+    // ── Storybook overhaul: terrain tile blocks ──
+    this.load.image('sb_grass_block', 'assets/storybook_overhaul/grass_block.png')
+    this.load.image('sb_dirt_block', 'assets/storybook_overhaul/dirt_block.png')
+    this.load.image('sb_cave_block', 'assets/storybook_overhaul/cave_block.png')
+    this.load.image('sb_lava_block', 'assets/storybook_overhaul/lava_block.png')
+    this.load.image('sb_desert_block', 'assets/storybook_overhaul/desert_block.png')
+    this.load.image('sb_snow_block', 'assets/storybook_overhaul/snow_block.png')
+    this.load.image('sb_deep_water', 'assets/storybook_overhaul/deep_water.png')
+    this.load.image('sb_water_surface', 'assets/storybook_overhaul/water_surface.png')
+    this.load.image('sb_grass_ledge_left', 'assets/storybook_overhaul/grass_ledge_left.png')
+    this.load.image('sb_grass_ledge_right', 'assets/storybook_overhaul/grass_ledge_right.png')
+
+    // ── Storybook overhaul: trees and flora ──
     this.load.image('sb_tree_ancient', 'assets/storybook_overhaul/tree_ancient.png')
+    this.load.image('sb_pine_tree', 'assets/storybook_overhaul/pine_tree.png')
+    this.load.image('sb_dead_tree', 'assets/storybook_overhaul/dead_tree.png')
     this.load.image('sb_bushes', 'assets/storybook_overhaul/bushes.png')
     this.load.image('sb_rocks', 'assets/storybook_overhaul/rocks.png')
-    this.load.image('sb_fireplace', 'assets/storybook_overhaul/fireplace.png')
-    this.load.image('sb_teepee', 'assets/storybook_overhaul/teepee.png')
-    this.load.image('sb_stone_altar', 'assets/storybook_overhaul/stone_altar.png')
+    this.load.image('sb_giant_mushrooms', 'assets/storybook_overhaul/giant_mushrooms.png')
     this.load.image('sb_giant_crystals', 'assets/storybook_overhaul/giant_crystals.png')
     this.load.image('sb_stalactite', 'assets/storybook_overhaul/stalactite.png')
     this.load.image('sb_mossy_boulder', 'assets/storybook_overhaul/mossy_boulder.png')
-    this.load.image('sb_giant_mushrooms', 'assets/storybook_overhaul/giant_mushrooms.png')
-    this.load.image('sb_pine_tree', 'assets/storybook_overhaul/pine_tree.png')
-    this.load.image('sb_dead_tree', 'assets/storybook_overhaul/dead_tree.png')
+
+    // ── Storybook overhaul: structures ──
+    this.load.image('sb_teepee', 'assets/storybook_overhaul/teepee.png')
+    this.load.image('sb_fireplace', 'assets/storybook_overhaul/fireplace.png')
+    this.load.image('sb_chest', 'assets/storybook_overhaul/chest.png')
+    this.load.image('sb_loot_crate', 'assets/storybook_overhaul/loot_crate.png')
+    this.load.image('sb_stone_altar', 'assets/storybook_overhaul/stone_altar.png')
+    this.load.image('sb_signpost', 'assets/storybook_overhaul/signpost.png')
+    this.load.image('sb_wooden_bridge', 'assets/storybook_overhaul/wooden_bridge.png')
+    this.load.image('sb_dungeon_door', 'assets/storybook_overhaul/dungeon_door.png')
+    this.load.image('sb_canoe', 'assets/storybook_overhaul/canoe.png')
+    this.load.image('sb_wooden_barrel', 'assets/storybook_overhaul/wooden_barrel.png')
+    this.load.image('sb_anvil', 'assets/storybook_overhaul/anvil.png')
+    this.load.image('sb_totem', 'assets/storybook_overhaul/totem.png')
+
+    // ── Storybook overhaul: characters ──
+    this.load.image('sb_villager_1', 'assets/storybook_overhaul/villager_1.png')
+    this.load.image('sb_villager_2', 'assets/storybook_overhaul/villager_2.png')
+    this.load.image('sb_villager_3', 'assets/storybook_overhaul/villager_3.png')
+    this.load.image('sb_villager_4', 'assets/storybook_overhaul/villager_4.png')
+    this.load.image('sb_warrior_base', 'assets/storybook_overhaul/warrior_base.png')
+    this.load.image('sb_player_base', 'assets/storybook_overhaul/player_base.png')
+
+    // ── Storybook overhaul: critters ──
+    this.load.image('sb_stag_deer', 'assets/storybook_overhaul/stag_deer.png')
+    this.load.image('sb_bear', 'assets/storybook_overhaul/bear.png')
+    this.load.image('sb_eagle', 'assets/storybook_overhaul/eagle.png')
+    this.load.image('sb_aquatic_fish', 'assets/storybook_overhaul/aquatic_fish.png')
+    this.load.image('sb_pig', 'assets/storybook_overhaul/pig.png')
+    this.load.image('sb_pet_cloud', 'assets/storybook_overhaul/pet_cloud.png')
+
+    // ── Storybook overhaul: NPCs ──
+    this.load.image('sb_traveling_merchant', 'assets/storybook_overhaul/traveling_merchant.png')
+    this.load.image('sb_royal_character', 'assets/storybook_overhaul/royal_character.png')
+    this.load.image('sb_hooded_mystic', 'assets/storybook_overhaul/hooded_mystic.png')
+    this.load.image('sb_elemental_spirit', 'assets/storybook_overhaul/elemental_spirit.png')
+    this.load.image('sb_undead_warrior', 'assets/storybook_overhaul/undead_warrior.png')
+
+    // ── Storybook overhaul: spells and projectiles ──
+    this.load.image('sb_fireball_spell', 'assets/storybook_overhaul/fireball_spell.png')
+    this.load.image('sb_lightning_bolt', 'assets/storybook_overhaul/lightning_bolt.png')
+    this.load.image('sb_icicle_projectile', 'assets/storybook_overhaul/icicle_projectile.png')
+    this.load.image('sb_heal_aura', 'assets/storybook_overhaul/heal_aura.png')
+    this.load.image('sb_shield_bubble', 'assets/storybook_overhaul/shield_bubble.png')
+    this.load.image('sb_star_particles', 'assets/storybook_overhaul/star_particles.png')
+    this.load.image('sb_boulder_projectile', 'assets/storybook_overhaul/boulder_projectile.png')
+    this.load.image('sb_sword_slash', 'assets/storybook_overhaul/sword_slash.png')
+    this.load.image('sb_dark_smoke', 'assets/storybook_overhaul/dark_smoke.png')
+    this.load.image('sb_arrow_projectile', 'assets/storybook_overhaul/arrow_projectile.png')
 
     // Sky variant paintings
     for (const key of SKY_VARIANTS) {

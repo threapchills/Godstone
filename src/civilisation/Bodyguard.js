@@ -33,15 +33,22 @@ export default class Bodyguard {
     this._lastMeleeTime = 0
     this.alive = true
 
-    const key = ensureWarriorTexture(scene, stage, clothingColour)
+    const hashSeed = Math.floor(x * 73856 + y * 19349)
+    const key = ensureWarriorTexture(scene, stage, clothingColour, hashSeed)
     this.sprite = scene.add.sprite(x, y, key)
     this.sprite.setOrigin(0.5, 1)
-    this.sprite.setDepth(7) // above villagers, below god
+    this.sprite.setDepth(7)
+
+    // Scale storybook sprite to world size
+    const srcH = this.sprite.height || 100
+    const targetH = stage >= 6 ? 18 : 16
+    this.sprite.setScale(targetH / srcH)
+    if (clothingColour) this.sprite.setTint(clothingColour)
 
     scene.physics.add.existing(this.sprite)
     this.sprite.body.setGravityY(GRAVITY)
     this.sprite.body.setCollideWorldBounds(false)
-    this.sprite.body.setSize(this.sprite.width - 1, this.sprite.height - 1)
+    this.sprite.body.setSize(Math.max(6, 10), Math.max(8, targetH - 2))
   }
 
   // Formation slot offsets relative to the god. Slot 0 = right shoulder,

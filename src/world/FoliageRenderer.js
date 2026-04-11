@@ -2,13 +2,19 @@ import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE } from '../core/Constants.js'
 import { TILES, SOLID_TILES } from './TileTypes.js'
 import { findGroundTileY } from '../utils/Grounding.js'
 
-// Manages large SkyBaby tree sprites overlaid on the tilemap where
-// the world generator placed TREE_TRUNK tiles. Handles wind sway,
+// Manages storybook illustration tree sprites overlaid on the tilemap
+// where the world generator placed TREE_TRUNK tiles. Uses three tree
+// variants (ancient, pine, dead) assigned per-tree by a seeded hash
+// so forests have natural species diversity. Handles wind sway,
 // depth-based alpha, dynamic destruction when lava burns forests,
 // and a slow life cycle: saplings mature into full trees, full trees
 // occasionally drop saplings onto adjacent surface tiles, and old
-// trees wither and die. This gives forests a sense of slow change
-// over real time without heavy simulation cost.
+// trees wither and die.
+
+// Storybook tree species. Each tree is assigned one based on a
+// deterministic hash of its position so forests have variety but
+// are stable across reloads. Dead trees use their own sprite.
+const TREE_SPECIES = ['sb_tree_ancient', 'sb_pine_tree', 'sb_tree_ancient']
 
 const LIFE = {
   SAPLING: 'sapling',
@@ -61,19 +67,17 @@ export default class FoliageRenderer {
     this.scene = scene
     this.worldGrid = worldGrid
     this.palette = palette
-    this.treeTextureKey = treeTextureKey || 'sb_tree'
+    // Legacy fallback only; species are now chosen per-tree
+    this.treeTextureKey = treeTextureKey || 'sb_tree_ancient'
     this.trees = []
     this.time = 0
     this._tickTimer = 0
 
     // Scan the world and spawn trees where the generator placed trunks.
-    // Each starts at "mature" stage with a randomised age offset so the
-    // existing forest isn't a single cohort.
     for (let x = 0; x < WORLD_WIDTH; x++) {
       for (let y = 1; y < WORLD_HEIGHT; y++) {
         const idx = y * WORLD_WIDTH + x
         if (worldGrid.grid[idx] === TILES.TREE_TRUNK) {
-          // Only spawn at the base of the tree (not mid-trunk)
           const below = worldGrid.grid[(y + 1) * WORLD_WIDTH + x]
           if (below !== TILES.TREE_TRUNK) {
             this.spawnTree(x, y, palette, LIFE.MATURE)
@@ -103,14 +107,22 @@ export default class FoliageRenderer {
     if (groundY >= WORLD_HEIGHT) return null // no ground; abort
 
     const worldX = tileX * TILE_SIZE + TILE_SIZE / 2
-    const worldY = groundY * TILE_SIZE // top of the actual ground tile
+    const worldY = groundY * TILE_SIZE
 
-    const sprite = this.scene.add.sprite(worldX, worldY, this.treeTextureKey)
+    // Pick a tree species deterministically by position. Dead stage
+    // always uses the dead tree sprite for visual clarity.
+    const speciesIdx = Math.abs((tileX * 73856) ^ (tileY * 19349)) % TREE_SPECIES.length
+    const speciesKey = stage === LIFE.DEAD ? 'sb_dead_tree' : TREE_SPECIES[speciesIdx]
+    // Graceful fallback: if the chosen species isn't loaded, use whatever is available
+    const textureKey = this.scene.textures.exists(speciesKey) ? speciesKey : this.treeTextureKey
+    const sprite = this.scene.add.sprite(worldX, worldY, textureKey)
     sprite.setOrigin(0.5, 1)
 
-    // SkyBaby tree is 942x916px; target 40-64px wide in the 8px-tile world.
-    // This is the MATURE scale; actual sprite scale is baseScale * stage factor.
-    const baseScale = 0.045 + rng * 0.025
+    // Scale to fit the 8px-tile world. Source sprites vary in size so we
+    // normalise: target 40-64px rendered height at mature stage.
+    const srcHeight = sprite.height || 400
+    const targetHeight = 40 + rng * 24
+    const baseScale = targetHeight / srcHeight
     sprite.setScale(baseScale * STAGE_SCALE[stage])
 
     // Tint to match the biome's leaf palette; slight per-tree hue shift
@@ -155,6 +167,7 @@ export default class FoliageRenderer {
       baseIndex: tileY * WORLD_WIDTH + tileX,
       baseScale,
       baseTint: { r: matureTintR, g: matureTintG, b: matureTintB },
+      speciesKey: textureKey,
       stage,
       age: initialAge,
       stageLength: STAGE_DURATION[stage] * (0.7 + Math.random() * 0.6),
@@ -180,6 +193,11 @@ export default class FoliageRenderer {
 
     const scale = tree.baseScale * STAGE_SCALE[tree.stage]
     tree.sprite.setScale(scale)
+
+    // Swap to dead tree sprite when the tree dies
+    if (tree.stage === LIFE.DEAD && this.scene.textures.exists('sb_dead_tree')) {
+      tree.sprite.setTexture('sb_dead_tree')
+    }
 
     const mul = STAGE_TINT_MUL[tree.stage]
     const tr = Math.max(0, Math.min(255, Math.round(tree.baseTint.r * mul.r)))

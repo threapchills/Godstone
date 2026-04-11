@@ -18,46 +18,48 @@ import { findGroundTileY } from '../utils/Grounding.js'
 // The sim is deliberately cheap: no physics integration, just tile
 // lookups and a bounded outer loop capped by the critter count.
 
-// Herbivore vocab per element — original roster, lightly extended.
+// Herbivore vocab per element — now mapped to storybook sprites.
+// Each species references a storybook illustration sprite key and
+// a tint colour; the sprite is scaled to a target pixel height
+// so all critters sit naturally in the 8px-tile world.
 const HERBIVORES = {
   fire: [
-    { colour: 0xcc4400, name: 'salamander', size: [8, 6], hp: 3, speed: 15 },
-    { colour: 0xff7733, name: 'phoenix',    size: [7, 7], hp: 3, speed: 18 },
-    { colour: 0xaa2200, name: 'ember-mite', size: [5, 4], hp: 2, speed: 22 },
-    { colour: 0xdd5511, name: 'ash-hare',   size: [9, 6], hp: 4, speed: 25 },
-    { colour: 0xff8800, name: 'spark-toad', size: [6, 5], hp: 3, speed: 14 },
+    { colour: 0xcc4400, name: 'salamander', sprite: 'sb_pig',          height: 10, hp: 3, speed: 15 },
+    { colour: 0xff7733, name: 'phoenix',    sprite: 'sb_eagle',        height: 10, hp: 3, speed: 18 },
+    { colour: 0xaa2200, name: 'ember-mite', sprite: 'sb_pig',          height: 7,  hp: 2, speed: 22 },
+    { colour: 0xdd5511, name: 'ash-hare',   sprite: 'sb_stag_deer',    height: 11, hp: 4, speed: 25 },
+    { colour: 0xff8800, name: 'spark-toad', sprite: 'sb_pig',          height: 8,  hp: 3, speed: 14 },
   ],
   water: [
-    { colour: 0x3388bb, name: 'crab',       size: [8, 6], hp: 4, speed: 12 },
-    { colour: 0x44aacc, name: 'frog',       size: [7, 6], hp: 3, speed: 18 },
-    { colour: 0x2266aa, name: 'newt',       size: [9, 5], hp: 3, speed: 16 },
-    { colour: 0x55bbee, name: 'mudfish',    size: [10, 5], hp: 3, speed: 14 },
-    { colour: 0x88ccdd, name: 'tide-shrimp',size: [6, 4], hp: 2, speed: 20 },
+    { colour: 0x3388bb, name: 'crab',       sprite: 'sb_aquatic_fish',  height: 9,  hp: 4, speed: 12 },
+    { colour: 0x44aacc, name: 'frog',       sprite: 'sb_aquatic_fish',  height: 8,  hp: 3, speed: 18 },
+    { colour: 0x2266aa, name: 'newt',       sprite: 'sb_aquatic_fish',  height: 8,  hp: 3, speed: 16 },
+    { colour: 0x55bbee, name: 'mudfish',    sprite: 'sb_aquatic_fish',  height: 10, hp: 3, speed: 14 },
+    { colour: 0x88ccdd, name: 'tide-shrimp',sprite: 'sb_aquatic_fish',  height: 6,  hp: 2, speed: 20 },
   ],
   air: [
-    { colour: 0xccddee, name: 'moth',       size: [7, 6], hp: 2, speed: 22 },
-    { colour: 0xeeeeff, name: 'wisp',       size: [5, 5], hp: 2, speed: 24 },
-    { colour: 0xaabbcc, name: 'sky-mite',   size: [6, 4], hp: 2, speed: 20 },
-    { colour: 0xddccff, name: 'cloud-bat',  size: [9, 5], hp: 3, speed: 26 },
-    { colour: 0xffffff, name: 'pollen-mite',size: [4, 4], hp: 2, speed: 22 },
+    { colour: 0xccddee, name: 'moth',       sprite: 'sb_eagle',        height: 9,  hp: 2, speed: 22 },
+    { colour: 0xeeeeff, name: 'wisp',       sprite: 'sb_pet_cloud',    height: 7,  hp: 2, speed: 24 },
+    { colour: 0xaabbcc, name: 'sky-mite',   sprite: 'sb_eagle',        height: 7,  hp: 2, speed: 20 },
+    { colour: 0xddccff, name: 'cloud-bat',  sprite: 'sb_eagle',        height: 10, hp: 3, speed: 26 },
+    { colour: 0xffffff, name: 'pollen-mite',sprite: 'sb_pet_cloud',    height: 6,  hp: 2, speed: 22 },
   ],
   earth: [
-    { colour: 0x667744, name: 'beetle',     size: [8, 6], hp: 4, speed: 12 },
-    { colour: 0x885533, name: 'lizard',     size: [9, 5], hp: 3, speed: 18 },
-    { colour: 0x445522, name: 'cricket',    size: [6, 5], hp: 2, speed: 20 },
-    { colour: 0x998866, name: 'mole-rat',   size: [10, 6], hp: 4, speed: 16 },
-    { colour: 0x556633, name: 'rock-louse', size: [5, 4], hp: 2, speed: 14 },
+    { colour: 0x667744, name: 'beetle',     sprite: 'sb_pig',          height: 9,  hp: 4, speed: 12 },
+    { colour: 0x885533, name: 'lizard',     sprite: 'sb_stag_deer',    height: 10, hp: 3, speed: 18 },
+    { colour: 0x445522, name: 'cricket',    sprite: 'sb_pig',          height: 7,  hp: 2, speed: 20 },
+    { colour: 0x998866, name: 'mole-rat',   sprite: 'sb_pig',          height: 10, hp: 4, speed: 16 },
+    { colour: 0x556633, name: 'rock-louse', sprite: 'sb_pig',          height: 6,  hp: 2, speed: 14 },
   ],
 }
 
-// Volatile predators — one per element. These hunt villagers and
-// take damage from the player. Larger HP pools and visibly bigger
-// sprites so you can tell them apart at a glance.
+// Volatile predators — one per element. Bears and stags serve as the
+// large, menacing storybook creatures.
 const PREDATORS = {
-  fire:  { colour: 0xff3322, name: 'ash-wolf',    size: [12, 9], hp: 12, speed: 28, volatile: true },
-  water: { colour: 0x125548, name: 'bog-serpent', size: [14, 7], hp: 10, speed: 24, volatile: true },
-  air:   { colour: 0xd0d8e0, name: 'storm-crow',  size: [11, 8], hp:  9, speed: 32, volatile: true },
-  earth: { colour: 0x4a3320, name: 'dire-mole',   size: [13, 9], hp: 14, speed: 22, volatile: true },
+  fire:  { colour: 0xff3322, name: 'ash-wolf',    sprite: 'sb_bear',  height: 16, hp: 12, speed: 28, volatile: true },
+  water: { colour: 0x125548, name: 'bog-serpent', sprite: 'sb_bear',  height: 14, hp: 10, speed: 24, volatile: true },
+  air:   { colour: 0xd0d8e0, name: 'storm-crow',  sprite: 'sb_eagle', height: 14, hp:  9, speed: 32, volatile: true },
+  earth: { colour: 0x4a3320, name: 'dire-mole',   sprite: 'sb_bear',  height: 16, hp: 14, speed: 22, volatile: true },
 }
 
 // Per-species breeding cooldown and pup parameters
@@ -146,47 +148,49 @@ export default class CritterManager {
     }
   }
 
-  // Spawn a critter. `isPup` makes the sprite scale smaller and starts
-  // the pup age clock; adult otherwise.
+  // Spawn a critter using its storybook sprite, scaled to the target
+  // height and tinted with the species' elemental colour.
   spawnCritter(tileX, tileY, type, isPup = false) {
     const px = tileX * TILE_SIZE + TILE_SIZE / 2
     const py = tileY * TILE_SIZE
 
-    const key = `critter-${type.name}`
-    const [tw, th] = type.size || [8, 6]
-    if (!this.scene.textures.exists(key)) {
-      const canvas = document.createElement('canvas')
-      canvas.width = tw
-      canvas.height = th
-      const ctx = canvas.getContext('2d')
+    // Use the storybook sprite; fall back to a canvas if not loaded
+    const spriteKey = type.sprite && this.scene.textures.exists(type.sprite) ? type.sprite : null
+    let sprite
 
-      const r = (type.colour >> 16) & 0xff
-      const g = (type.colour >> 8) & 0xff
-      const b = type.colour & 0xff
+    if (spriteKey) {
+      sprite = this.scene.add.sprite(px, py, spriteKey)
+      sprite.setOrigin(0.5, 1)
+      sprite.setDepth(4)
 
-      const bodyTop = Math.max(1, Math.floor(th * 0.3))
-      const bodyHeight = Math.max(2, th - bodyTop - 1)
-      ctx.fillStyle = `rgb(${r},${g},${b})`
-      ctx.fillRect(1, bodyTop, tw - 2, bodyHeight)
-      ctx.fillRect(tw - 2, bodyTop - 1, 2, Math.max(1, bodyHeight - 1))
-      ctx.fillStyle = `rgb(${Math.min(255, r + 40)},${Math.min(255, g + 40)},${Math.min(255, b + 40)})`
-      ctx.fillRect(2, bodyTop + 1, Math.max(1, tw - 4), 1)
-      ctx.fillStyle = `rgb(${Math.max(0, r - 30)},${Math.max(0, g - 30)},${Math.max(0, b - 30)})`
-      for (let lx = 1; lx < tw - 1; lx += 2) ctx.fillRect(lx, th - 1, 1, 1)
+      // Scale to target height
+      const targetH = type.height || 10
+      const srcH = sprite.height || 100
+      const scale = targetH / srcH
+      sprite.setScale(isPup ? scale * 0.5 : scale)
 
-      // Predators get a little fang highlight so they read as menacing
-      if (type.volatile) {
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(tw - 2, bodyTop + 1, 1, 1)
+      // Tint with species colour
+      if (type.colour) sprite.setTint(type.colour)
+    } else {
+      // Legacy canvas fallback
+      const key = `critter-${type.name}`
+      const tw = 8; const th = 6
+      if (!this.scene.textures.exists(key)) {
+        const canvas = document.createElement('canvas')
+        canvas.width = tw; canvas.height = th
+        const ctx = canvas.getContext('2d')
+        const r = (type.colour >> 16) & 0xff
+        const g = (type.colour >> 8) & 0xff
+        const b = type.colour & 0xff
+        ctx.fillStyle = `rgb(${r},${g},${b})`
+        ctx.fillRect(1, 1, tw - 2, th - 2)
+        this.scene.textures.addCanvas(key, canvas)
       }
-
-      this.scene.textures.addCanvas(key, canvas)
+      sprite = this.scene.add.sprite(px, py, key)
+      sprite.setOrigin(0.5, 1)
+      sprite.setDepth(4)
+      if (isPup) sprite.setScale(0.6)
     }
-
-    const sprite = this.scene.add.sprite(px, py, key)
-    sprite.setOrigin(0.5, 1)
-    sprite.setDepth(4)
-    if (isPup) sprite.setScale(0.6)
 
     return {
       sprite,

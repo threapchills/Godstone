@@ -81,138 +81,21 @@ function blendHex(a, b, t) {
   return (r << 16) | (g << 8) | b2
 }
 
-// ── Building drawing functions ──────────────────────────────
+// ── Building type → storybook sprite mapping ────────────────
+// Each building type maps to a storybook illustration sprite key and
+// a target rendered height. The sprite is scaled to fit the world's
+// 8px-tile grid while preserving the hand-painted look. Higher-stage
+// buildings use larger, more impressive sprites.
 
-function drawLeanTo(ctx, w, h, wall, roof, dark) {
-  ctx.fillStyle = hexRgb(wall)
-  ctx.beginPath()
-  ctx.moveTo(1, h)
-  ctx.lineTo(Math.floor(w * 0.5), 2)
-  ctx.lineTo(w - 1, h)
-  ctx.fill()
-  ctx.strokeStyle = hexRgb(dark)
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(3, h - 2); ctx.lineTo(Math.floor(w * 0.5), 3)
-  ctx.moveTo(w - 3, h - 2); ctx.lineTo(Math.floor(w * 0.5), 3)
-  ctx.stroke()
-}
-
-function drawHut(ctx, w, h, wall, roof, dark) {
-  const roofY = Math.floor(h * 0.45)
-  ctx.fillStyle = hexRgb(wall)
-  ctx.fillRect(2, roofY, w - 4, h - roofY)
-  ctx.fillStyle = hexRgb(roof)
-  ctx.beginPath()
-  ctx.moveTo(0, roofY)
-  ctx.lineTo(Math.floor(w / 2), 0)
-  ctx.lineTo(w, roofY)
-  ctx.fill()
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(Math.floor(w / 2) - 2, h - 5, 4, 5)
-}
-
-function drawHouse(ctx, w, h, wall, roof, dark) {
-  const roofY = Math.floor(h * 0.4)
-  ctx.fillStyle = hexRgb(wall)
-  ctx.fillRect(2, roofY, w - 4, h - roofY)
-  ctx.fillStyle = hexRgb(roof)
-  ctx.beginPath()
-  ctx.moveTo(0, roofY)
-  ctx.lineTo(Math.floor(w / 2), 2)
-  ctx.lineTo(w, roofY)
-  ctx.fill()
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(Math.floor(w / 2) - 2, h - 6, 5, 6)
-  ctx.fillStyle = hexRgb(blendHex(wall, 0xffcc66, 0.5))
-  ctx.fillRect(4, Math.floor(h * 0.5), 3, 3)
-}
-
-function drawLonghouse(ctx, w, h, wall, roof, dark) {
-  const roofY = Math.floor(h * 0.4)
-  ctx.fillStyle = hexRgb(wall)
-  ctx.fillRect(2, roofY, w - 4, h - roofY)
-  ctx.fillStyle = hexRgb(roof)
-  ctx.beginPath()
-  ctx.moveTo(0, roofY)
-  ctx.lineTo(Math.floor(w * 0.3), 2)
-  ctx.lineTo(Math.floor(w * 0.7), 2)
-  ctx.lineTo(w, roofY)
-  ctx.fill()
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(Math.floor(w / 2) - 3, h - 7, 6, 7)
-  const winCol = hexRgb(blendHex(wall, 0xffcc66, 0.5))
-  ctx.fillStyle = winCol
-  ctx.fillRect(5, Math.floor(h * 0.5), 3, 3)
-  ctx.fillRect(w - 8, Math.floor(h * 0.5), 3, 3)
-}
-
-function drawTower(ctx, w, h, wall, roof, dark) {
-  const capY = Math.floor(h * 0.2)
-  ctx.fillStyle = hexRgb(wall)
-  ctx.fillRect(1, capY + 2, w - 2, h - capY - 2)
-  ctx.fillStyle = hexRgb(roof)
-  ctx.fillRect(0, capY, w, 3)
-  for (let i = 0; i < w; i += 3) {
-    ctx.fillRect(i, capY - 3, 2, 3)
-  }
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(Math.floor(w / 2), Math.floor(h * 0.4), 1, 4)
-  ctx.fillRect(Math.floor(w / 2) - 1, h - 4, 3, 4)
-}
-
-function drawTemple(ctx, w, h, wall, roof, dark) {
-  const baseY = Math.floor(h * 0.5)
-  ctx.fillStyle = hexRgb(wall)
-  ctx.fillRect(2, baseY, w - 4, h - baseY)
-  ctx.fillStyle = hexRgb(roof)
-  const tierH = Math.floor(h * 0.13)
-  for (let i = 0; i < 3; i++) {
-    const inset = i * Math.floor(w * 0.1)
-    ctx.fillRect(inset, baseY - (i + 1) * tierH, w - inset * 2, tierH + 1)
-  }
-  const peakBase = baseY - 3 * tierH
-  ctx.beginPath()
-  ctx.moveTo(Math.floor(w * 0.3), peakBase)
-  ctx.lineTo(Math.floor(w / 2), 0)
-  ctx.lineTo(Math.floor(w * 0.7), peakBase)
-  ctx.fill()
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(Math.floor(w / 2) - 3, h - 8, 6, 8)
-  ctx.fillStyle = hexRgb(blendHex(wall, 0xffffff, 0.3))
-  ctx.fillRect(6, baseY, 2, h - baseY)
-  ctx.fillRect(w - 8, baseY, 2, h - baseY)
-}
-
-function drawWall(ctx, w, h, wall, roof, dark) {
-  ctx.fillStyle = hexRgb(blendHex(wall, 0x888888, 0.3))
-  ctx.fillRect(0, 0, w, h)
-  ctx.fillStyle = hexRgb(dark)
-  ctx.fillRect(3, 1, 1, 1)
-  ctx.fillRect(8, 2, 1, 1)
-  ctx.fillRect(14, 1, 1, 1)
-}
-
-function drawFirepit(ctx, w, h) {
-  ctx.fillStyle = '#555555'
-  ctx.fillRect(0, h - 2, w, 2)
-  ctx.fillStyle = '#ff4400'
-  ctx.fillRect(2, h - 4, 2, 2)
-  ctx.fillStyle = '#ffaa00'
-  ctx.fillRect(3, h - 5, 1, 1)
-  ctx.fillStyle = '#ffdd44'
-  ctx.fillRect(2, h - 6, 1, 1)
-}
-
-const BUILDING_SPECS = {
-  'lean-to':   { w: 16, h: 12, draw: drawLeanTo },
-  'hut':       { w: 20, h: 16, draw: drawHut },
-  'house':     { w: 28, h: 20, draw: drawHouse },
-  'longhouse': { w: 36, h: 20, draw: drawLonghouse },
-  'tower':     { w: 12, h: 32, draw: drawTower },
-  'temple':    { w: 40, h: 28, draw: drawTemple },
-  'wall':      { w: 20, h: 8, draw: drawWall },
-  'firepit':   { w: 8, h: 6, draw: drawFirepit },
+const BUILDING_SPRITES = {
+  'firepit':   { sprite: 'sb_fireplace',     height: 18 },
+  'lean-to':   { sprite: 'sb_teepee',        height: 28 },
+  'hut':       { sprite: 'sb_teepee',        height: 34 },
+  'house':     { sprite: 'sb_chest',         height: 28 },
+  'longhouse': { sprite: 'sb_wooden_barrel', height: 30 },
+  'tower':     { sprite: 'sb_totem',         height: 50 },
+  'temple':    { sprite: 'sb_stone_altar',   height: 42 },
+  'wall':      { sprite: 'sb_anvil',         height: 16 },
 }
 
 // ── Village class ───────────────────────────────────────────
@@ -276,17 +159,24 @@ export default class Village {
       const type = this._pickBuildingType(rng)
       const dx = i === 0 ? 0 : (rng() - 0.5) * 2 * spread * TILE_SIZE
       const buildingX = cx + dx
-      // Snap each building to its own column's ground so they hug hills
-      // and valleys. Search starts a few tiles above the village anchor
-      // with a generous walk distance so buildings always reach solid
-      // ground even across deep caves or eroded terrain.
       const py = grid
         ? findGroundTileY(grid, Math.floor(buildingX / TILE_SIZE), Math.max(0, this.tileY - 6), this.tileY, 200) * TILE_SIZE
         : this.tileY * TILE_SIZE
-      const key = this._ensureBuildingTexture(type)
-      const sprite = this.scene.add.sprite(buildingX, py, key)
+      const spriteKey = this._getBuildingSpriteKey(type)
+      const spec = BUILDING_SPRITES[type] || BUILDING_SPRITES['hut']
+      const sprite = this.scene.add.sprite(buildingX, py, spriteKey)
       sprite.setOrigin(0.5, 1)
-      sprite.setScale(BUILDING_SCALE)
+
+      // Scale to target height; storybook sprites are much larger than
+      // the old procedural canvases but we want them to sit naturally
+      // in the 8px-tile world.
+      const srcH = sprite.height || 100
+      const targetH = spec.height || 28
+      const scale = targetH / srcH
+      sprite.setScale(scale)
+
+      // Element tint so buildings match the world's colour scheme
+      sprite.setTint(this.wallColour)
       sprite.setDepth(5)
       this.buildings.push(sprite)
     }
@@ -369,34 +259,12 @@ export default class Village {
     return 'house'
   }
 
-  _ensureBuildingTexture(type) {
-    const e1 = this.params.element1
-    const e2 = this.params.element2
-    const key = `bld-${type}-${e1}-${e2}`
-    if (this.scene.textures.exists(key)) return key
-
-    const dims = {
-      'lean-to': [16, 12], hut: [20, 16], house: [28, 20],
-      longhouse: [36, 20], tower: [12, 32], temple: [40, 28],
-      wall: [20, 8], firepit: [8, 6],
-    }
-    const [w, h] = dims[type] || [20, 16]
-    const canvas = document.createElement('canvas')
-    canvas.width = w; canvas.height = h
-    const ctx = canvas.getContext('2d')
-
-    const wall = this.wallColour
-    const roof = this.roofColour
-    const dark = this.darkColour
-    const drawFn = {
-      'lean-to': drawLeanTo, hut: drawHut, house: drawHouse,
-      longhouse: drawLonghouse, tower: drawTower, temple: drawTemple,
-      wall: drawWall, firepit: drawFirepit,
-    }
-    if (drawFn[type]) drawFn[type](ctx, w, h, wall, roof, dark)
-
-    this.scene.textures.addCanvas(key, canvas)
-    return key
+  // Returns the storybook sprite key for a building type. No canvas
+  // generation needed; the sprites are loaded as full images in BootScene.
+  _getBuildingSpriteKey(type) {
+    const spec = BUILDING_SPRITES[type]
+    if (!spec) return 'sb_teepee'
+    return this.scene.textures.exists(spec.sprite) ? spec.sprite : 'sb_teepee'
   }
 
   // ── Villager / warrior management ───────────────────

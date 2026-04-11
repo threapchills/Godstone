@@ -346,12 +346,23 @@ export class ElementalBurstSpell extends Spell {
     const dy = Math.max(-Math.abs(dx) * 1.5, Math.min(maxDownDy, rawDy))
     const angle = Math.atan2(dy, dx)
     const speed = 360
-    const ball = scene.add.circle(sx, sy, 10, 0xff7733, 0.85)
-      .setDepth(20)
-      .setBlendMode(Phaser.BlendModes.ADD)
-    const glow = scene.add.circle(sx, sy, 22, 0xffaa44, 0.35)
-      .setDepth(19)
-      .setBlendMode(Phaser.BlendModes.ADD)
+    // Use storybook fireball sprite if available
+    let ball, glow
+    if (scene.textures.exists('sb_fireball_spell')) {
+      ball = scene.add.sprite(sx, sy, 'sb_fireball_spell')
+        .setDepth(20).setBlendMode(Phaser.BlendModes.ADD)
+      const srcH = ball.height || 64
+      ball.setScale(20 / srcH)
+      ball.setAlpha(0.9)
+      glow = scene.add.sprite(sx, sy, 'sb_fireball_spell')
+        .setDepth(19).setBlendMode(Phaser.BlendModes.ADD)
+      glow.setScale(40 / srcH).setAlpha(0.3).setTint(0xffaa44)
+    } else {
+      ball = scene.add.circle(sx, sy, 10, 0xff7733, 0.85)
+        .setDepth(20).setBlendMode(Phaser.BlendModes.ADD)
+      glow = scene.add.circle(sx, sy, 22, 0xffaa44, 0.35)
+        .setDepth(19).setBlendMode(Phaser.BlendModes.ADD)
+    }
     if (!scene._activeFireballs) scene._activeFireballs = []
     scene._activeFireballs.push({
       ball, glow,

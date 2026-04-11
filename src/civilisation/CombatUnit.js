@@ -79,16 +79,24 @@ export default class CombatUnit {
     this._isFlying = false
     this._surfaceSeekTimer = 0
 
-    // Sprite: reuse the existing per-stage warrior texture builder
-    const key = ensureWarriorTexture(scene, this.stage, clothingColour)
+    // Sprite: storybook illustration warrior, scaled to world size
+    const hashSeed = Math.floor(x * 31337 + y * 7919)
+    const key = ensureWarriorTexture(scene, this.stage, clothingColour, hashSeed)
     this.sprite = scene.add.sprite(x, y, key)
     this.sprite.setOrigin(0.5, 1)
     this.sprite.setDepth(7)
+
+    // Scale storybook sprite to fit; target ~16px tall for combat units
+    const srcH = this.sprite.height || 100
+    const targetH = this.stage >= 6 ? 18 : 16
+    this.sprite.setScale(targetH / srcH)
+    if (clothingColour) this.sprite.setTint(clothingColour)
+
     scene.physics.add.existing(this.sprite)
     const body = this.sprite.body
     body.setGravityY(GRAVITY)
     body.setCollideWorldBounds(false)
-    body.setSize(Math.max(6, this.sprite.width - 1), Math.max(8, this.sprite.height - 1))
+    body.setSize(Math.max(6, 10), Math.max(8, targetH - 2))
     body.setMaxVelocityY(600)
 
     // Team-tinted halo: a faint coloured ring underfoot so allies and
@@ -295,10 +303,11 @@ export default class CombatUnit {
         if (now - this._lastMeleeTime > MELEE_COOLDOWN_MS) {
           this._lastMeleeTime = now
           target.takeDamage(this.meleeDamage, this)
-          // Tiny lunge
+          // Tiny lunge: scale relative to current size, not absolute
+          const baseScale = this.sprite.scaleX
           this.scene.tweens.add({
             targets: this.sprite,
-            scaleX: 1.12, scaleY: 1.12,
+            scaleX: baseScale * 1.12, scaleY: baseScale * 1.12,
             yoyo: true,
             duration: 80,
           })
@@ -345,9 +354,12 @@ export default class CombatUnit {
       body.setVelocityX(body.velocity.x * 0.7)
     }
 
-    // ── Obstacle jumping: aggressive when stuck ──
-    if (onGround && (body.blocked.left || body.blocked.right)) {
+    // ── Obstacle jumping: cooldown prevents rapid jitter ──
+    if (!this._jumpCooldown) this._jumpCooldown = 0
+    if (this._jumpCooldown > 0) this._jumpCooldown -= delta
+    if (onGround && (body.blocked.left || body.blocked.right) && this._jumpCooldown <= 0) {
       body.setVelocityY(-350)
+      this._jumpCooldown = 600 // 600ms between obstacle jumps
     }
     // Stuck escalation: if stuck for > 1s, start flying to escape
     if (this._stuckTimer > 1000 && !this._isFlying) {

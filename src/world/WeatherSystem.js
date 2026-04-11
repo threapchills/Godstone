@@ -89,16 +89,23 @@ export default class WeatherSystem {
   }
 
   _buildCloudTexture() {
-    const key = 'weather-cloud'
-    if (this.scene.textures.exists(key)) return
-    const w = 96
-    const h = 36
-    const c = document.createElement('canvas')
-    c.width = w
-    c.height = h
-    const ctx = c.getContext('2d')
+    // Use storybook fluffy_clouds if available; the illustration sprite
+    // gives clouds a hand-painted storybook feel rather than the old
+    // procedural gradient blobs. Fall back to procedural if not loaded.
+    if (this.scene.textures.exists('fluffy_clouds')) {
+      this._cloudTextureKey = 'fluffy_clouds'
+      return
+    }
 
-    // Layered soft ellipses with gentle fade so clouds don't read as hard blobs
+    const key = 'weather-cloud'
+    if (this.scene.textures.exists(key)) {
+      this._cloudTextureKey = key
+      return
+    }
+    const w = 96; const h = 36
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    const ctx = c.getContext('2d')
     const layers = [
       { r: 28, cx: 20, cy: 20, a: 0.35 },
       { r: 22, cx: 42, cy: 14, a: 0.45 },
@@ -115,8 +122,8 @@ export default class WeatherSystem {
       ctx.arc(l.cx, l.cy, l.r, 0, Math.PI * 2)
       ctx.fill()
     }
-
     this.scene.textures.addCanvas(key, c)
+    this._cloudTextureKey = key
   }
 
   _spawnClouds(count) {
@@ -149,10 +156,18 @@ export default class WeatherSystem {
       const scale = 0.8 + Math.random() * 2.2
       const drift = (CLOUD_DRIFT_MIN + Math.random() * (CLOUD_DRIFT_MAX - CLOUD_DRIFT_MIN)) *
         (Math.random() > 0.5 ? 1 : -1)
-      const sprite = this.scene.add.image(x, y, 'weather-cloud')
+      const cloudKey = this._cloudTextureKey || 'weather-cloud'
+      const sprite = this.scene.add.image(x, y, cloudKey)
         .setAlpha(0.35 + Math.random() * 0.35)
-        .setScale(scale, scale * 0.85)
-        .setDepth(3) // behind foreground entities but above parallax sky
+        .setDepth(3)
+      // Storybook clouds need different scaling than procedural ones
+      if (cloudKey === 'fluffy_clouds') {
+        const srcW = sprite.width || 200
+        const targetW = 60 + scale * 40
+        sprite.setScale(targetW / srcW, (targetW / srcW) * 0.7)
+      } else {
+        sprite.setScale(scale, scale * 0.85)
+      }
 
       this.clouds.push({
         sprite,

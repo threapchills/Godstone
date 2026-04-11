@@ -22,6 +22,7 @@ import ParticleEngine from '../world/ParticleEngine.js'
 import GridSimulator from '../world/GridSimulator.js'
 import WeatherSystem from '../world/WeatherSystem.js'
 import FoliageRenderer from '../world/FoliageRenderer.js'
+import TerrainEdges from '../world/TerrainEdges.js'
 import MossLayer from '../world/MossLayer.js'
 import { pickVariants } from '../world/AssetVariants.js'
 import CombatUnit from '../civilisation/CombatUnit.js'
@@ -246,10 +247,15 @@ export default class WorldScene extends Phaser.Scene {
       this.physics.add.overlap(this.god.sprite, tablet._zone, () => this.onTabletPickup(tablet))
     })
 
-    // Village delivery zones
+    // Village delivery zones: position at the actual building Y, not the
+    // original tile Y, so the trigger area matches where buildings landed
+    // after grounding.
     this.villages.forEach(village => {
+      const buildingY = village.buildings.length > 0
+        ? village.buildings.reduce((s, b) => s + b.y, 0) / village.buildings.length
+        : village.worldY
       const zone = this.add.zone(
-        village.worldX, village.worldY - TILE_SIZE, TILE_SIZE * 8, TILE_SIZE * 5
+        village.worldX, buildingY - TILE_SIZE, TILE_SIZE * 8, TILE_SIZE * 5
       )
       this.physics.add.existing(zone, true)
       this.physics.add.overlap(this.god.sprite, zone, () => this.onVillageProximity(village))
@@ -321,6 +327,9 @@ export default class WorldScene extends Phaser.Scene {
     const variants = pickVariants(params.seed || 0)
     this.variants = variants
     this.foliageRenderer = new FoliageRenderer(this, this.worldGrid, palette, variants.treeKey)
+
+    // Terrain edge overlay: soft storybook sprites at surface boundaries
+    this.terrainEdges = new TerrainEdges(this, this.worldGrid, palette)
 
     // Moss layer: a slowly spreading green film on surface tiles.
     this.mossLayer = new MossLayer(this, this.worldGrid, params, worldData.surfaceHeights)
@@ -680,7 +689,7 @@ export default class WorldScene extends Phaser.Scene {
         const need = village.nextRequiredTablet
         const have = this.god.highestTablet
         if (have > 0) {
-          this.showMessage(`${village.name} needs ${need} tablet${need > 1 ? 's' : ''} to advance. You have ${have}.`, 1800)
+          this.showMessage(`Find more tablets to advance ${village.name}. (${have} of ${need} collected)`, 1800)
         } else {
           this.showMessage(`${village.name} is waiting for ancient knowledge.`, 1800)
         }
@@ -1126,6 +1135,9 @@ export default class WorldScene extends Phaser.Scene {
 
     // Foliage update (wind sway + destroy burned trees)
     if (this.foliageRenderer) this.foliageRenderer.update(dilatedDelta)
+
+    // Terrain edge overlay: soft sprites at terrain boundaries
+    if (this.terrainEdges) this.terrainEdges.update(dilatedDelta, this.cameras.main)
 
     // Moss layer: slow spread tick + per-frame overlay redraw (cheap,
     // culled to visible tile range).
