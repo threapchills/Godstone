@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { GAME_WIDTH, GAME_HEIGHT } from './core/Constants.js'
+import BootScene from './scenes/BootScene.js'
 import CreationScene from './scenes/CreationScene.js'
 import WorldScene from './scenes/WorldScene.js'
 
@@ -7,7 +8,7 @@ const config = {
   type: Phaser.AUTO,
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
-  backgroundColor: '#0d0d1a',
+  backgroundColor: '#0a0b12',
   parent: document.body,
   scale: {
     mode: Phaser.Scale.FIT,
@@ -20,7 +21,7 @@ const config = {
       debug: false,
     },
   },
-  scene: [CreationScene, WorldScene],
+  scene: [BootScene, CreationScene, WorldScene],
   pixelArt: true,
   roundPixels: true,
 }

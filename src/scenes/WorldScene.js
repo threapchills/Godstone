@@ -64,21 +64,68 @@ export default class WorldScene extends Phaser.Scene {
     this.baseSkyColour = palette.skyColour
     this.cameras.main.setBackgroundColor(this.baseSkyColour)
 
-    // Show loading text while generating. World gen runs synchronously
-    // after a single-frame defer so the text has time to paint. Using
-    // this.time.delayedCall keeps everything inside Phaser's lifecycle
-    // so scene.restart() works cleanly (requestAnimationFrame breaks
-    // the update loop on restart because the callback outlives the
-    // old scene instance).
-    const loadText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Shaping the world...', {
+    // Loading screen while world generates. World gen is synchronous
+    // but heavy; the single-frame defer lets the loading UI paint first.
+    const loadContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(100)
+
+    // Dark overlay
+    const loadBg = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2,
+      GAME_WIDTH, GAME_HEIGHT, 0x0a0b12, 1).setScrollFactor(0)
+    loadContainer.add(loadBg)
+
+    // Title
+    const loadTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60,
+      params.isRaid ? 'Walking between worlds...' : 'Shaping the world...', {
       fontFamily: 'Georgia, serif',
-      fontSize: '20px',
-      color: '#c07a28',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(100)
+      fontSize: '22px',
+      color: '#e4b660',
+      stroke: '#3a2a10',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0)
+    loadContainer.add(loadTitle)
+
+    // Subtitle with element pair
+    const loadSub = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30,
+      `${params.element1} + ${params.element2}`, {
+      fontFamily: 'Georgia, serif',
+      fontSize: '14px',
+      color: '#7a8a6a',
+      fontStyle: 'italic',
+    }).setOrigin(0.5).setScrollFactor(0)
+    loadContainer.add(loadSub)
+
+    // Animated spinner: orbiting dots
+    const spinnerDots = []
+    for (let i = 0; i < 5; i++) {
+      const dot = this.add.circle(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20,
+        2.5 - i * 0.3, 0xe4b660, 0.7 - i * 0.1).setScrollFactor(0)
+      loadContainer.add(dot)
+      spinnerDots.push(dot)
+    }
+
+    // Spin the dots
+    this._loadSpinnerTween = this.tweens.addCounter({
+      from: 0, to: 360, duration: 1800, repeat: -1,
+      onUpdate: (tween) => {
+        const base = tween.getValue() * (Math.PI / 180)
+        for (let i = 0; i < spinnerDots.length; i++) {
+          const a = base + (i / spinnerDots.length) * Math.PI * 2
+          spinnerDots[i].x = GAME_WIDTH / 2 + Math.cos(a) * 18
+          spinnerDots[i].y = GAME_HEIGHT / 2 + 20 + Math.sin(a) * 18
+        }
+      },
+    })
 
     this.time.delayedCall(1, () => {
       this.buildWorld(params)
-      if (loadText && loadText.active) loadText.destroy()
+      // Fade out loading screen gracefully
+      if (this._loadSpinnerTween) this._loadSpinnerTween.stop()
+      this.tweens.add({
+        targets: loadContainer,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => loadContainer.destroy(),
+      })
     })
   }
 
@@ -622,6 +669,9 @@ export default class WorldScene extends Phaser.Scene {
     if (!village || village.isReceiving) return
     if (village.stage >= 20) return // fully ascendant; nothing left to give
 
+    // Cannot deliver knowledge to enemy villages on raid worlds
+    if (village.team === 'enemy') return
+
     if (!village.canAccept(this.god.highestTablet)) {
       // Throttle the rejection hint per-village so it doesn't spam every frame
       const now = this.time.now
@@ -642,12 +692,10 @@ export default class WorldScene extends Phaser.Scene {
     village.isReceiving = true
 
     // Determine how many stages we can advance in this single walk-in.
-    // Cap at 10 so god-statue stages (8-10) are reachable once Phase 7
-    // lands the raid loop; until then the god can still never climb
-    // past 7 on the home world because highestTablet won't exceed the
-    // available home tablets.
+    // A village at stage N needs highestTablet >= N+1 to advance to N+1.
+    // So the maximum reachable stage equals the god's tablet count.
     const startStage = village.stage
-    const maxStage = Math.min(20, this.god.highestTablet + 1)
+    const maxStage = Math.min(20, this.god.highestTablet)
     const upgrades = maxStage - startStage
     if (upgrades <= 0) {
       village.isReceiving = false
@@ -670,9 +718,11 @@ export default class WorldScene extends Phaser.Scene {
           this.addJuice(severity)
         }
 
-        // Final beat: unlock proximity, refresh enlightened count, hint
+        // Final beat: unlock proximity after a grace period so the
+        // overlap doesn't immediately fire a rejection while the god
+        // is still standing in the zone.
         if (i === upgrades - 1) {
-          village.isReceiving = false
+          this.time.delayedCall(2000, () => { village.isReceiving = false })
 
           const advanced = this.villages.filter(v => v.stage > 1).length
           this.villageHUD.setText(`Villages: ${this.villages.length} (${advanced} enlightened)`)
@@ -866,6 +916,33 @@ export default class WorldScene extends Phaser.Scene {
       village.updatePopulation(dilatedDelta)
       village.updateVillagers(dilatedDelta)
       village.updateGrounding()
+
+      // Sync the interaction zone with the village's current position.
+      // Buildings fall via updateGrounding; the zone must follow so the
+      // player can always reach the trigger spot near the actual houses.
+      if (village._zone && village.buildings.length > 0) {
+        const avgY = village.buildings.reduce((s, b) => s + b.y, 0) / village.buildings.length
+        const newZoneY = avgY - TILE_SIZE
+        if (Math.abs(village._zone.y - newZoneY) > 2) {
+          village._zone.y = newZoneY
+          village._zone.body.updateFromGameObject()
+        }
+        // Keep label and belief bar near the buildings too
+        if (village.label) village.label.y = avgY - TILE_SIZE * 10
+        if (village.beliefBar) {
+          village.beliefBar.clear()
+          const px = village.worldX
+          const py = avgY - TILE_SIZE * 10 - 6
+          const barWidth = 24
+          const barHeight = 3
+          village.beliefBar.fillStyle(0x333333, 0.8)
+          village.beliefBar.fillRect(px - barWidth / 2, py, barWidth, barHeight)
+          const fillWidth = (village.belief / 100) * barWidth
+          const colour = village.belief > 60 ? 0x44aa44 : village.belief > 30 ? 0xaaaa44 : 0xaa4444
+          village.beliefBar.fillStyle(colour, 1)
+          village.beliefBar.fillRect(px - barWidth / 2, py, fillWidth, barHeight)
+        }
+      }
 
       // Raid world: track village destruction (pop <= 0 and enemy team)
       if (this.params?.isRaid && village.team === 'enemy' && !village._destroyed) {
@@ -1517,6 +1594,13 @@ export default class WorldScene extends Phaser.Scene {
       // Tracking for god statue progression
       this._raidVillagesDestroyed = this._initRaidVillagesDestroyed || 0
       this._godStatueInventory = this._initGodStatueInventory || 0
+
+      // Activate combat immediately on raid worlds; the war is already happening
+      if (this.warDirector) {
+        this.warDirector.enableRaidCycle()
+        this.warDirector.state = 'RAID'
+        this.warDirector.stateTimer = 30000
+      }
 
       this.showMessage('You walk between worlds...', 2400)
     } else if (_homeWorldSnapshot && godState) {

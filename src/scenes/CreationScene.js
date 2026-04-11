@@ -24,21 +24,25 @@ export default class CreationScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('sb_tileset', 'assets/environment/island_tileset.png')
-    this.load.image('sb_tree', 'assets/backgrounds/tree-variant1.png')
-    this.load.image('sb_grass', 'assets/environment/grass.png')
-    this.load.image('sb_sky1', 'assets/backgrounds/sky_layer_1.jpeg')
-    this.load.image('sb_sky2', 'assets/backgrounds/sky_layer_2.png')
-    this.load.image('sb_clouds', 'assets/backgrounds/clouds_fg.png')
-    this.load.image('dist_mountains', 'assets/storybook_overhaul/distant_mountains.png')
-    this.load.image('fluffy_clouds', 'assets/storybook_overhaul/fluffy_clouds.png')
-    this.load.image('sb_teepee_blue', 'assets/environment/teepee_blue.png')
-    this.load.image('sb_teepee_green', 'assets/environment/teepee_green.png')
-    this.load.image('leaf', 'assets/environment/leaf.png')
+    // Most assets are already loaded by BootScene; only load anything
+    // that BootScene might have missed (guard with textures.exists)
+    const maybeLoad = (key, path) => {
+      if (!this.textures.exists(key)) this.load.image(key, path)
+    }
+    maybeLoad('sb_tileset', 'assets/environment/island_tileset.png')
+    maybeLoad('sb_tree', 'assets/backgrounds/tree-variant1.png')
+    maybeLoad('sb_grass', 'assets/environment/grass.png')
+    maybeLoad('sb_sky1', 'assets/backgrounds/sky_layer_1.jpeg')
+    maybeLoad('sb_sky2', 'assets/backgrounds/sky_layer_2.png')
+    maybeLoad('sb_clouds', 'assets/backgrounds/clouds_fg.png')
+    maybeLoad('dist_mountains', 'assets/storybook_overhaul/distant_mountains.png')
+    maybeLoad('fluffy_clouds', 'assets/storybook_overhaul/fluffy_clouds.png')
+    maybeLoad('sb_teepee_blue', 'assets/environment/teepee_blue.png')
+    maybeLoad('sb_teepee_green', 'assets/environment/teepee_green.png')
+    maybeLoad('leaf', 'assets/environment/leaf.png')
 
-    // Sky variant paintings: each world picks from these per seed
     for (const key of SKY_VARIANTS) {
-      this.load.image(`skyvar_${key}`, `assets/backgrounds/sky-variants/${key}.png`)
+      maybeLoad(`skyvar_${key}`, `assets/backgrounds/sky-variants/${key}.png`)
     }
   }
 

@@ -159,7 +159,11 @@ const FLORA_BY_BIOME = {
   deep_root:        { underground: { name: 'root-mushroom', size: [7, 9], colour: 0xaa66cc, dark: 0x442266, draw: drawGlowMushroom, density: 0.08 } },
 }
 
-const MAX_FLORA = 240 // hard cap so a single world can't drown the renderer
+// Hard cap scales with fertility so fertile worlds visibly overflow
+// with decorative flora while barren worlds stay sparse. Base 240
+// was invisible at world scale; 600+ fills meadows and cave floors.
+const BASE_MAX_FLORA = 300
+const MAX_FLORA_FERTILE = 700
 
 // ── Manager ─────────────────────────────────────────────────
 
@@ -171,20 +175,26 @@ export default class BiomeFlora {
 
     if (!biomeMap || !biomeVocab) return
 
+    const fertility = params?.barrenFertile ?? 0.5
+    const maxFlora = Math.floor(BASE_MAX_FLORA + fertility * (MAX_FLORA_FERTILE - BASE_MAX_FLORA))
+    // Fertility scales the effective density: at 0 density is halved,
+    // at 1 density is boosted 50% above the base values.
+    const fertilityMul = 0.5 + fertility * 1.0
+
     const grid = worldGrid.grid
     const seed = (params?.seed || 12345) >>> 0
     const rng = mulberry32(seed + 7777)
 
     // Pass 1: surface decorations
     let placed = 0
-    for (let x = 0; x < WORLD_WIDTH && placed < MAX_FLORA; x++) {
+    for (let x = 0; x < WORLD_WIDTH && placed < maxFlora; x++) {
       const sy = Math.floor(surfaceHeights[x])
       if (sy <= 2 || sy >= WORLD_HEIGHT - 5) continue
       const biomeIdx = biomeMap[sy * WORLD_WIDTH + x]
       const biomeName = biomeVocab[biomeIdx]
       const flora = FLORA_BY_BIOME[biomeName]?.surface
       if (!flora) continue
-      if (rng() > flora.density) continue
+      if (rng() > flora.density * fertilityMul) continue
       const sprite = this._spawn(scene, x, sy, flora)
       if (sprite) {
         this.flora.push({ sprite, tileX: x, biome: biomeName })
@@ -193,7 +203,7 @@ export default class BiomeFlora {
     }
 
     // Pass 2: underground (cave floor) decorations
-    for (let x = 0; x < WORLD_WIDTH && placed < MAX_FLORA; x++) {
+    for (let x = 0; x < WORLD_WIDTH && placed < maxFlora; x++) {
       const sy = Math.floor(surfaceHeights[x])
       // Walk down checking biome at each cave-floor candidate
       for (let y = sy + 12; y < WORLD_HEIGHT - 10; y++) {
@@ -203,7 +213,7 @@ export default class BiomeFlora {
         const biomeName = biomeVocab[biomeIdx]
         const flora = FLORA_BY_BIOME[biomeName]?.underground
         if (!flora) continue
-        if (rng() > flora.density) continue
+        if (rng() > flora.density * fertilityMul) continue
         const sprite = this._spawn(scene, x, y, flora)
         if (sprite) {
           this.flora.push({ sprite, tileX: x, biome: biomeName })

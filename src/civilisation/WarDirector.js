@@ -85,6 +85,17 @@ export default class WarDirector {
       }
     }
 
+    // On raid worlds, auto-dispatch enemy defenders and drain enemy
+    // village populations when home raiders are nearby (the assault loop)
+    if (this.scene.params?.isRaid) {
+      this._nextRaidAssaultCheck = (this._nextRaidAssaultCheck || 0) - delta
+      if (this._nextRaidAssaultCheck <= 0) {
+        this._nextRaidAssaultCheck = 2000
+        this._tickRaidAssaults()
+        this._dispatchEnemyDefenders()
+      }
+    }
+
     // Update combat units
     for (let i = 0; i < this.units.length; i++) {
       const u = this.units[i]
@@ -236,6 +247,79 @@ export default class WarDirector {
       if (this.scene.worldLayer && !unit._hasCollider) {
         unit._hasCollider = true
         this.scene.physics.add.collider(unit.sprite, this.scene.worldLayer)
+      }
+    }
+  }
+
+  // ── Raid world: village assault mechanic ──────────────
+  // Home-team raiders near an enemy village chip away at its population.
+  // This is what makes "battling" a village tangible: stand your ground
+  // near it and your warriors wear it down. The god's spells also
+  // contribute via a separate AOE-kills-pop path in WorldScene.
+  _tickRaidAssaults() {
+    const vs = this.scene.villages || []
+    const assaultRange = TILE_SIZE * 18
+
+    for (const v of vs) {
+      if (v.team !== 'enemy' || v._destroyed) continue
+      // Count home combatants near this village
+      let raidersNearby = 0
+      for (const u of this.units) {
+        if (!u.alive || u.team !== 'home') continue
+        const dx = u.sprite.x - v.worldX
+        const dy = u.sprite.y - v.worldY
+        if (dx * dx + dy * dy < assaultRange * assaultRange) raidersNearby++
+      }
+      // Also count the god's presence as an assault contribution
+      if (this.scene.god?.sprite) {
+        const gx = this.scene.god.sprite.x - v.worldX
+        const gy = this.scene.god.sprite.y - v.worldY
+        if (gx * gx + gy * gy < assaultRange * assaultRange) raidersNearby += 5
+      }
+
+      if (raidersNearby > 0) {
+        // Population drain: proportional to raider count, faster for more
+        const drain = raidersNearby * 4.0  // ~4 pop per raider per 2s tick
+        v.population = Math.max(0, v.population - drain)
+        // Belief also erodes under assault
+        v.belief = Math.max(0, v.belief - raidersNearby * 1.5)
+      }
+    }
+  }
+
+  // Enemy villages spawn their own defenders during raid worlds. This
+  // is the other side of the battle: the enemy fights back. Defenders
+  // spawn periodically from high-pop villages.
+  _dispatchEnemyDefenders() {
+    const vs = this.scene.villages || []
+    let enemyCombatCount = 0
+    for (const u of this.units) if (u.team === 'enemy' && u.alive) enemyCombatCount++
+    // Cap enemy combat units at a reasonable number
+    if (enemyCombatCount >= 120) return
+    if (this.units.length >= COMBAT_UNIT_CAP) return
+
+    for (const v of vs) {
+      if (v.team !== 'enemy' || v._destroyed) continue
+      if (v.population < 20 || v.stage < 2) continue
+      if (this.units.length >= COMBAT_UNIT_CAP) break
+
+      // Each village dispatches 1-3 defenders per tick, weighted by stage
+      const count = Math.min(3, Math.max(1, Math.floor(v.stage / 2)))
+      for (let i = 0; i < count; i++) {
+        if (this.units.length >= COMBAT_UNIT_CAP) break
+        const ox = v.worldX + (Math.random() - 0.5) * TILE_SIZE * 8
+        const oy = v.worldY - 20
+        const clothing = 0xff5533
+        const unit = new CombatUnit(this.scene, ox, oy, v.stage, 'enemy', v, clothing)
+        // Defenders are a mix: some guard the village, some raid
+        unit.role = Math.random() < 0.5 ? 'bodyguard' : 'raider'
+        this.units.push(unit)
+        if (this.scene.worldLayer && !unit._hasCollider) {
+          unit._hasCollider = true
+          this.scene.physics.add.collider(unit.sprite, this.scene.worldLayer)
+        }
+        // Spend population to spawn a defender (they came from somewhere)
+        v.population = Math.max(0, v.population - 1)
       }
     }
   }

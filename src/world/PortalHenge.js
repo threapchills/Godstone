@@ -199,6 +199,6 @@ export default class PortalHenge {
     })
   }
 
-  get worldX() { return this.tileX * TILE_SIZE + TILE_SIZE * 3 }
-  get worldY() { return this.tileY * TILE_SIZE }
+  get worldX() { return this.sprite ? this.sprite.x : this.tileX * TILE_SIZE + TILE_SIZE * 3 }
+  get worldY() { return this.sprite ? this.sprite.y : this.tileY * TILE_SIZE }
 }

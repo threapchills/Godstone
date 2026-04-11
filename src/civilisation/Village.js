@@ -13,19 +13,19 @@ const POP_CAPS = [
 ]
 
 // Growth rate is multiplied by belief, stage, and fertility factors in
-// updatePopulation. Bumped up so populations actually reach their caps
-// within a reasonable play session; the base used to be 0.3 which made
-// stage 7 villages crawl.
-const BASE_GROWTH_RATE = 0.9
+// updatePopulation. Bumped to 1.6 so populations visibly swell during
+// play sessions; the old 0.9 meant stage 5+ villages crawled toward
+// their caps. At 1.6 a well-believed stage 7 village with fertile
+// terrain reaches 200+ within about a minute of proximity.
+const BASE_GROWTH_RATE = 1.6
 const GROWTH_THRESHOLD = 20
 const DECLINE_THRESHOLD = 10
 
-// Visible villager budget per village. The hybrid pattern from Sky Baby:
-// all population is tracked as a number, but only a capped subset spawns
-// as simulated sprites. At ~50 visible per village * 16 villages = 800
-// simulated units at peak, comfortably under the 500-at-once ceiling
-// Sky Baby proved viable on commodity hardware.
-const MAX_VISIBLE_VILLAGERS = 50
+// Visible villager budget per village. Bumped from 50 to 80 so late-game
+// villages feel properly bustling; at 22 villages worst case is ~1760
+// sprites, but most villages won't hit the cap simultaneously and the
+// rendering is cheap (non-physics, simple texture, no AI beyond wander).
+const MAX_VISIBLE_VILLAGERS = 80
 
 // Building counts and spread scale all the way through stage 10. Raid
 // tier villages sprawl into sprawling towns with temples, towers, and

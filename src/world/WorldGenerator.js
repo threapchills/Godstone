@@ -408,7 +408,7 @@ export function generateWorld(params) {
 
   // ── Pass 7: vegetation on all surfaces ────────────────────
 
-  addVegetation(grid, surfaceHeights, barrenFertile, noise2D_c, rng4, vocab ? { biomeMap, vocab } : null)
+  addVegetation(grid, surfaceHeights, barrenFertile, noise2D_c, rng4, vocab ? { biomeMap, vocab } : null, sparseDense)
 
   recomputeSurface()
   return { grid, surfaceHeights, biomeMap, biomeVocab: vocab }
@@ -479,12 +479,19 @@ function addFloatingIslands(grid, noise2D, surfaceHeights, airWeight, rng) {
   }
 }
 
-// Vegetation on ALL surfaces (cliff ledges, cave floors, mountain peaks)
-function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData) {
+// Vegetation on ALL surfaces (cliff ledges, cave floors, mountain peaks).
+// The fertility slider now has a dramatic effect: at full fertility the
+// landscape fills with proper forests and meadows, not isolated saplings.
+// sparseDense also contributes a secondary density bonus so "dense +
+// fertile" worlds feel teeming.
+function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData, sparseDense) {
   const idx = (x, y) => y * WORLD_WIDTH + x
-  const baseTreeChance = 0.02 + fertility * 0.06
-  const baseBushChance = 0.03 + fertility * 0.08
-  const baseGrassChance = 0.05 + fertility * 0.15
+  // densityBonus: 0.0 at sparse, ~0.6 at dense. Contributes extra tree
+  // and bush coverage in packed worlds so both sliders feel meaningful.
+  const densityBonus = (sparseDense || 0.5) * 0.6
+  const baseTreeChance = 0.03 + fertility * 0.18 + densityBonus * 0.04
+  const baseBushChance = 0.04 + fertility * 0.16 + densityBonus * 0.03
+  const baseGrassChance = 0.08 + fertility * 0.25 + densityBonus * 0.02
 
   for (let x = 0; x < WORLD_WIDTH; x++) {
     for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
@@ -538,7 +545,7 @@ function addVegetation(grid, surfaceHeights, fertility, noise2D, rng, biomeData)
   }
 
   // Mushrooms on cave floors (underground only); boosted in fungal biomes
-  const baseMushroomChance = 0.005 + fertility * 0.01
+  const baseMushroomChance = 0.008 + fertility * 0.025
   for (let x = 0; x < WORLD_WIDTH; x++) {
     const primarySurface = Math.floor(surfaceHeights[x])
     for (let y = primarySurface + 10; y < WORLD_HEIGHT - 10; y++) {
