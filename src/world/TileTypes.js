@@ -73,16 +73,62 @@ export const VARIANT_TO_BASE = (() => {
   return map
 })()
 
-// Every render ID actually used (base types + their variants + unvaried types).
-// Consumers that enumerate the full ID space (tileset canvas builder,
-// collision setup) use this.
+// ── Edge variants (autotiling) ──────────────────────────────
+// Solid tiles bordering air/liquid get organic, nibbled edges instead
+// of full squares. A 4-bit mask encodes which sides are exposed:
+//   bit 3 = air above, bit 2 = air below, bit 1 = air left, bit 0 = air right
+// Mask 0 (surrounded) uses normal variants. Masks 1-15 each get a
+// dedicated render ID with transparent edge pixels.
+
+export const EDGE_ID_START = 200
+
+// Only solid materials get edge variants (liquids flow organically already)
+const EDGE_BASE_TYPES = [
+  TILES.SURFACE, TILES.SOIL, TILES.STONE, TILES.BEDROCK,
+  TILES.SAND, TILES.ICE, TILES.CLAY, TILES.VOLCANIC_ROCK,
+  TILES.CORAL, TILES.CRYSTAL, TILES.MAGMA_ROCK, TILES.CLOUD,
+]
+
+export const TILE_EDGE_VARIANTS = (() => {
+  const map = {}
+  let nextId = EDGE_ID_START
+  for (const baseId of EDGE_BASE_TYPES) {
+    const maskMap = {}
+    for (let mask = 1; mask <= 15; mask++) {
+      maskMap[mask] = nextId++
+    }
+    map[baseId] = maskMap
+  }
+  return map
+})()
+
+// Reverse lookup: edge render ID → canonical base ID
+export const EDGE_TO_BASE = (() => {
+  const map = {}
+  for (const [baseIdStr, maskMap] of Object.entries(TILE_EDGE_VARIANTS)) {
+    const baseId = Number(baseIdStr)
+    for (const [, id] of Object.entries(maskMap)) {
+      map[id] = baseId
+    }
+  }
+  return map
+})()
+
+// Given a base tile ID and edge mask, return the edge render ID
+export function edgeIdFor(baseId, edgeMask) {
+  if (edgeMask === 0) return baseId
+  return TILE_EDGE_VARIANTS[baseId]?.[edgeMask] ?? baseId
+}
+
+// Every render ID actually used: base + variants + edge variants.
 export const ALL_RENDER_IDS = (() => {
   const ids = new Set()
-  // All base IDs first
   for (const id of Object.values(TILES)) ids.add(id)
-  // Plus every variant
   for (const variants of Object.values(TILE_VARIANTS)) {
     for (const v of variants) ids.add(v)
+  }
+  for (const maskMap of Object.values(TILE_EDGE_VARIANTS)) {
+    for (const id of Object.values(maskMap)) ids.add(id)
   }
   return [...ids].sort((a, b) => a - b)
 })()
@@ -123,6 +169,9 @@ export const LIQUID_TILES = new Set([
 for (const baseId of [...SOLID_TILES]) {
   const variants = TILE_VARIANTS[baseId]
   if (variants) for (const v of variants) SOLID_TILES.add(v)
+  // Edge variants are also solid
+  const edgeMaskMap = TILE_EDGE_VARIANTS[baseId]
+  if (edgeMaskMap) for (const id of Object.values(edgeMaskMap)) SOLID_TILES.add(id)
 }
 for (const baseId of [...LIQUID_TILES]) {
   const variants = TILE_VARIANTS[baseId]

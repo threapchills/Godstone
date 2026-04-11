@@ -266,6 +266,12 @@ export default class WorldScene extends Phaser.Scene {
     this.cameras.main.scrollX = this.god.sprite.x - GAME_WIDTH / 2
     this.cameras.main.scrollY = this.god.sprite.y - GAME_HEIGHT / 2
 
+    // Extend the camera's render area so sprites (trees, flora, critters)
+    // materialise well beyond the visible viewport. Prevents pop-in at edges.
+    if (this.cameras.main.setRenderPadding) {
+      this.cameras.main.setRenderPadding(TILE_SIZE * 20, TILE_SIZE * 20)
+    }
+
     // World bounds for physics (extended to cover wrap padding so collisions work at edges)
     this.physics.world.setBounds(
       -WRAP_PAD * TILE_SIZE, 0,

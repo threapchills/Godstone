@@ -67,10 +67,13 @@ export default class TerrainEdges {
     const camCX = camera.scrollX + halfW
     const camCY = camera.scrollY + halfH
 
-    const startX = Math.max(0, Math.floor((camCX - halfW - TILE_SIZE * 4) / TILE_SIZE))
-    const startY = Math.max(0, Math.floor((camCY - halfH - TILE_SIZE * 4) / TILE_SIZE))
-    const endX = Math.min(WORLD_WIDTH, Math.ceil((camCX + halfW + TILE_SIZE * 4) / TILE_SIZE))
-    const endY = Math.min(WORLD_HEIGHT, Math.ceil((camCY + halfH + TILE_SIZE * 4) / TILE_SIZE))
+    // Wide margin so edge sprites materialise well beyond the camera
+    // view and the player never sees the pop-in transition.
+    const margin = TILE_SIZE * 16
+    const startX = Math.max(0, Math.floor((camCX - halfW - margin) / TILE_SIZE))
+    const startY = Math.max(0, Math.floor((camCY - halfH - margin) / TILE_SIZE))
+    const endX = Math.min(WORLD_WIDTH, Math.ceil((camCX + halfW + margin) / TILE_SIZE))
+    const endY = Math.min(WORLD_HEIGHT, Math.ceil((camCY + halfH + margin) / TILE_SIZE))
 
     const camKey = `${startX},${startY},${endX},${endY}`
     if (camKey === this._lastCamKey) return

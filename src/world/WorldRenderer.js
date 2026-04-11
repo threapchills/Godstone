@@ -6,8 +6,12 @@ import {
   ALL_RENDER_IDS,
   MAX_RENDER_ID,
   SOLID_TILES,
+  LIQUID_TILES,
   buildPalette,
   renderIdFor,
+  TILE_EDGE_VARIANTS,
+  EDGE_TO_BASE,
+  edgeIdFor,
 } from './TileTypes.js'
 
 // Padding columns on each side for seamless horizontal wrapping
@@ -195,6 +199,105 @@ export function createTilesetTexture(scene, params) {
     }
   }
 
+  // ── Edge variants: organic nibbled edges for autotiling ─────
+  // Each solid material's 15 edge masks (1-15) get a tile cell that
+  // starts from the base texture+colour, then has exposed-edge pixels
+  // cleared using a noise pattern. The result: terrain boundaries are
+  // ragged and organic instead of perfect squares.
+
+  // Deterministic noise for organic nibble shapes
+  const edgeNoise = (x, y, seed) => {
+    let n = Math.sin(x * 12.9898 + y * 78.233 + seed * 43758.5453) * 43758.5453
+    return n - Math.floor(n)
+  }
+
+  for (const [baseIdStr, maskMap] of Object.entries(TILE_EDGE_VARIANTS)) {
+    const baseId = Number(baseIdStr)
+    const baseColour = palette[baseId]
+    if (baseColour == null) continue
+
+    const sourceKey = TILE_SOURCE_MAP[baseId]
+    const sourceImg = sourceKey ? sourceCache[sourceKey] : null
+
+    for (const [maskStr, edgeId] of Object.entries(maskMap)) {
+      const mask = Number(maskStr)
+      const px = edgeId * TILE_SIZE
+
+      // 1. Draw the base tile exactly like a normal variant
+      ctx.save()
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.filter = 'grayscale(100%) brightness(1.2) contrast(0.92)'
+
+      if (sourceImg) {
+        // Use a fixed crop for edge tiles (variant 0 layout)
+        ctx.drawImage(sourceImg, 0, 0, sourceImg.width * 0.35, sourceImg.height * 0.35,
+          px, 0, TILE_SIZE, TILE_SIZE)
+      } else if (texTileset) {
+        ctx.drawImage(texTileset, 0, 0, texTileset.width / 3, texTileset.height,
+          px, 0, TILE_SIZE, TILE_SIZE)
+      } else {
+        ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
+      }
+      ctx.restore()
+      ctx.save()
+
+      // 2. Multiply palette colour
+      ctx.globalCompositeOperation = 'multiply'
+      const r = (baseColour >> 16) & 0xff
+      const g = (baseColour >> 8) & 0xff
+      const b = baseColour & 0xff
+      ctx.fillStyle = `rgb(${r},${g},${b})`
+      ctx.fillRect(px, 0, TILE_SIZE, TILE_SIZE)
+      ctx.restore()
+
+      // 3. Nibble away exposed edges using noise-driven alpha masking
+      const hasTop = (mask & 8) !== 0
+      const hasBottom = (mask & 4) !== 0
+      const hasLeft = (mask & 2) !== 0
+      const hasRight = (mask & 1) !== 0
+
+      const imgData = ctx.getImageData(px, 0, TILE_SIZE, TILE_SIZE)
+      const data = imgData.data
+      const noiseSeed = baseId * 17 + mask * 31
+
+      for (let y = 0; y < TILE_SIZE; y++) {
+        for (let x = 0; x < TILE_SIZE; x++) {
+          const i = (y * TILE_SIZE + x) * 4
+
+          // Distance from each exposed edge (in pixels)
+          let minDist = TILE_SIZE
+          if (hasTop) minDist = Math.min(minDist, y)
+          if (hasBottom) minDist = Math.min(minDist, TILE_SIZE - 1 - y)
+          if (hasLeft) minDist = Math.min(minDist, x)
+          if (hasRight) minDist = Math.min(minDist, TILE_SIZE - 1 - x)
+
+          if (minDist >= 4) continue // interior pixel, keep solid
+
+          // Noise-driven threshold: pixels closer to exposed edges
+          // have a higher chance of being cleared. The noise creates
+          // irregular, organic shapes instead of uniform fade.
+          const n = edgeNoise(x, y, noiseSeed)
+
+          // Aggressive nibble: clear 0-3px from edge with noise variation.
+          // The threshold curve determines the edge profile:
+          //   dist 0: always clear (100% transparent)
+          //   dist 1: clear if noise > 0.2 (80% chance)
+          //   dist 2: clear if noise > 0.5 (50% chance)
+          //   dist 3: clear if noise > 0.75 (25% chance)
+          const threshold = minDist / 4
+          if (n > threshold) {
+            data[i + 3] = 0 // fully transparent
+          } else if (minDist <= 1) {
+            // Soft fade for the innermost surviving pixels
+            data[i + 3] = Math.floor(data[i + 3] * 0.5)
+          }
+        }
+      }
+
+      ctx.putImageData(imgData, px, 0)
+    }
+  }
+
   if (scene.textures.exists('worldTiles')) {
     const existing = scene.textures.get('worldTiles')
     if (existing) existing.destroy()
@@ -216,21 +319,52 @@ export function createTilemap(scene, worldData) {
   const { grid } = worldData
   const totalWidth = WORLD_WIDTH + 2 * WRAP_PAD
 
+  // Helper: is this tile non-solid from the rendering perspective?
+  // Used for edge detection: a solid tile bordering a non-solid tile
+  // gets an organic edge variant instead of a full square.
+  const isTransparent = (tile) =>
+    tile === TILES.AIR || tile === TILES.TREE_LEAVES || tile === TILES.TREE_TRUNK ||
+    tile === TILES.BUSH || tile === TILES.TALL_GRASS || tile === TILES.MUSHROOM ||
+    LIQUID_TILES.has(tile)
+
   const data = []
   for (let y = 0; y < WORLD_HEIGHT; y++) {
     const row = []
     for (let x = 0; x < totalWidth; x++) {
-      // Map padded column back to the logical world column
       let wx = x - WRAP_PAD
       wx = ((wx % WORLD_WIDTH) + WORLD_WIDTH) % WORLD_WIDTH
       const tile = grid[y * WORLD_WIDTH + wx]
-      if (tile === TILES.AIR || tile === TILES.TREE_LEAVES || tile === TILES.TREE_TRUNK ||
-          tile === TILES.BUSH || tile === TILES.TALL_GRASS || tile === TILES.MUSHROOM) {
-        row.push(-1)
+
+      if (isTransparent(tile) || tile === TILES.VILLAGE_MARKER || tile === TILES.TABLET_MARKER) {
+        // Liquids still render (they aren't transparent TO the tilemap)
+        if (LIQUID_TILES.has(tile)) {
+          row.push(renderIdFor(tile, wx, y))
+        } else {
+          row.push(-1)
+        }
       } else {
-        // Pick a variant deterministically per logical position. Using wx (not x)
-        // keeps mirrored padding columns in phase with the real world column.
-        row.push(renderIdFor(tile, wx, y))
+        // Check 4 cardinal neighbours for edge detection
+        const above = y > 0 ? grid[(y - 1) * WORLD_WIDTH + wx] : TILES.AIR
+        const below = y < WORLD_HEIGHT - 1 ? grid[(y + 1) * WORLD_WIDTH + wx] : tile
+        const leftWx = ((wx - 1) + WORLD_WIDTH) % WORLD_WIDTH
+        const rightWx = (wx + 1) % WORLD_WIDTH
+        const left = grid[y * WORLD_WIDTH + leftWx]
+        const right = grid[y * WORLD_WIDTH + rightWx]
+
+        const edgeMask =
+          (isTransparent(above) ? 8 : 0) |
+          (isTransparent(below) ? 4 : 0) |
+          (isTransparent(left) ? 2 : 0) |
+          (isTransparent(right) ? 1 : 0)
+
+        if (edgeMask > 0) {
+          // This tile has at least one exposed edge: use the organic
+          // edge variant so the boundary reads as rough and natural.
+          row.push(edgeIdFor(tile, edgeMask))
+        } else {
+          // Fully surrounded: use a normal variant (full square, invisible anyway)
+          row.push(renderIdFor(tile, wx, y))
+        }
       }
     }
     data.push(row)
