@@ -38,10 +38,49 @@ const TABLET_COUNT = 7        // one per home stage (1-7); raids yield 8-10
 const VILLAGE_SPACING = 70    // minimum tile distance between villages
 const DAY_DURATION = 120000   // 2 minutes per full day/night cycle
 
+// Civilisation is ascendant at stage 7 ("Civilisation" tier). When every
+// surviving home village reaches this threshold, the player wins. The
+// bar can be nudged upward via ASCENSION_STAGE if 7 ends up feeling too
+// reachable; Mike flagged "7 or 10 or so" during design discussion.
+const ASCENSION_STAGE = 7
+
 // Module-level storage for the home world snapshot. Survives scene
 // restarts because it lives outside the scene instance. Cleared when
 // the player returns home.
 let _homeWorldSnapshot = null
+
+// Each home world is paired with exactly ONE mirror raid world per
+// session. We generate the mirror's parameters the first time the
+// player goes outbound (opposite elements, inverted sliders, twin
+// seed). On subsequent visits we restore the raid world's persistent
+// state so dead enemy gods stay dead, destroyed villages stay ruined,
+// and the rival god's story accrues across trips.
+let _mirrorWorldParams = null
+let _mirrorWorldState = null
+
+// Build a mirror of a home-world params object. Opposite elements,
+// inverted terrain sliders, predictable sibling seed. Produces the
+// same mirror every time given the same home params.
+function _deriveMirrorParams(homeParams) {
+  const opposites = { fire: 'water', water: 'fire', earth: 'air', air: 'earth' }
+  const e1 = opposites[homeParams.element1] || 'fire'
+  const e2 = opposites[homeParams.element2] || 'earth'
+  return {
+    seed: (homeParams.seed ^ 0x9e3779b9) >>> 0,
+    element1: e1,
+    element2: e2,
+    // Inverted ratio so the mirror's elemental flavour also flips
+    elementRatio: 10 - (homeParams.elementRatio ?? 5),
+    skyCave: 1 - (homeParams.skyCave ?? 0.5),
+    barrenFertile: 1 - (homeParams.barrenFertile ?? 0.5),
+    sparseDense: 1 - (homeParams.sparseDense ?? 0.5),
+    isRaid: true,
+    // Carry the player's god appearance across so they look consistent
+    godHead: homeParams.godHead,
+    godBody: homeParams.godBody,
+    godLegs: homeParams.godLegs,
+  }
+}
 
 export default class WorldScene extends Phaser.Scene {
   constructor() {
@@ -55,6 +94,18 @@ export default class WorldScene extends Phaser.Scene {
     this._initWarriorCount = data.warriorCount || 0
     this._initGodStatueInventory = data.godStatueInventory || 0
     this._initRaidVillagesDestroyed = data.raidVillagesDestroyed || 0
+    // Persistent raid-world state from a prior visit, if any. Applied
+    // in _applyPostBuildState so the mirror world keeps its continuity.
+    this._initRaidState = data.raidState || null
+
+    // Fresh home-world boot with no carry-over god state = a brand-new
+    // session. Clear the mirror snapshot so the next outbound generates
+    // a paired raid world rather than re-using one from a prior game.
+    if (!data.godState && !data.params.isRaid) {
+      _mirrorWorldParams = null
+      _mirrorWorldState = null
+      _homeWorldSnapshot = null
+    }
   }
 
   create() {
@@ -619,6 +670,43 @@ export default class WorldScene extends Phaser.Scene {
       strokeThickness: 1,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
     c.add(this.depthText)
+
+    // Raid objectives HUD: appears only on raid worlds; shows how many
+    // enemy villages have fallen, how many god statues have been secured,
+    // and how many more villages stand between the god and the next one.
+    // Lives top-right under the coordinates/depth readouts.
+    if (params.isRaid) {
+      this.raidObjectiveTitle = this.add.text(GAME_WIDTH - pad, pad + 34, 'Raid objective', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '11px',
+        color: '#ff8844',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
+      c.add(this.raidObjectiveTitle)
+
+      this.raidStatusText = this.add.text(GAME_WIDTH - pad, pad + 50,
+        'Villages felled: 0 · Statues: 0', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '10px',
+        color: '#e4c2a0',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
+      c.add(this.raidStatusText)
+
+      this.raidHintText = this.add.text(GAME_WIDTH - pad, pad + 64,
+        'Topple 3 villages for a god statue. Return through the portal.', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '9px',
+        color: '#887766',
+        stroke: '#000000',
+        strokeThickness: 1,
+        wordWrap: { width: 230 },
+        align: 'right',
+      }).setOrigin(1, 0).setScrollFactor(0).setDepth(50)
+      c.add(this.raidHintText)
+    }
   }
 
   showMessage(text, duration = 3000) {
@@ -694,10 +782,10 @@ export default class WorldScene extends Phaser.Scene {
         village._lastRejectionHint = now
         const need = village.nextRequiredTablet
         const have = this.god.highestTablet
-        if (have > 0) {
-          this.showMessage(`Find more tablets to advance ${village.name}. (${have} of ${need} collected)`, 1800)
-        } else {
+        if (have === 0) {
           this.showMessage(`${village.name} is waiting for ancient knowledge.`, 1800)
+        } else {
+          this.showMessage(`${village.name} needs ${need - have} more tablet${need - have > 1 ? 's' : ''} to advance.`, 1800)
         }
       }
       return
@@ -707,10 +795,13 @@ export default class WorldScene extends Phaser.Scene {
     village.isReceiving = true
 
     // Determine how many stages we can advance in this single walk-in.
-    // A village at stage N needs highestTablet >= N+1 to advance to N+1.
-    // So the maximum reachable stage equals the god's tablet count.
+    // A village at stage N needs highestTablet >= N to advance to N+1;
+    // each additional tablet unlocks one more advancement. So from stage
+    // N with T tablets the village can rise to stage min(20, N+1, …, N+?)
+    // where ? = T - N remaining advancements. Equivalent: the final
+    // reachable stage is min(20, highestTablet + 1).
     const startStage = village.stage
-    const maxStage = Math.min(20, this.god.highestTablet)
+    const maxStage = Math.min(20, this.god.highestTablet + 1)
     const upgrades = maxStage - startStage
     if (upgrades <= 0) {
       village.isReceiving = false
@@ -805,6 +896,16 @@ export default class WorldScene extends Phaser.Scene {
     // God movement
     this.god.update(this.worldGrid, time, dilatedDelta)
 
+    // Ghost-mode timer: counts down the mourning wander and resurrects
+    // (or permadies) the god when it expires.
+    this._tickGhostWander(dilatedDelta)
+
+    // Inter-village migration: periodically moves +1 pop from a
+    // surplus village to a needier one, with a brief traveller sprite
+    // visible between them. Runs at ~8 s intervals so worlds feel like
+    // they have a quiet circulatory system.
+    this._tickMigration(dilatedDelta)
+
     // Horizontal world wrapping
     const worldPixelWidth = WORLD_WIDTH * TILE_SIZE
     let wrapDelta = 0
@@ -867,8 +968,11 @@ export default class WorldScene extends Phaser.Scene {
     this.hudContainer.x = midX * (1 - invZoom)
     this.hudContainer.y = midY * (1 - invZoom)
 
-    // Kill plane
-    if (this.god.sprite.y > WORLD_HEIGHT * TILE_SIZE) {
+    // Kill plane: falling off the bottom of the world kills outright.
+    // Ghosts float and have no gravity so this won't fire on them, but
+    // the isGhost guard keeps things explicit.
+    if (!this.god.isGhost && this.god.sprite.y > WORLD_HEIGHT * TILE_SIZE) {
+      this.god.hp = 0
       this.respawnGod()
     }
 
@@ -930,6 +1034,7 @@ export default class WorldScene extends Phaser.Scene {
       village.updateBelief(dist, dilatedDelta)
       village.updatePopulation(dilatedDelta)
       village.updateVillagers(dilatedDelta)
+      village.updateBreeding(dilatedDelta)
       village.updateGrounding()
 
       // Sync the interaction zone with the village's current position.
@@ -1026,7 +1131,8 @@ export default class WorldScene extends Phaser.Scene {
 
     // God touch-kills: walking into enemy units obliterates them.
     // A god is a god; mere mortals cannot withstand contact.
-    if (this.warDirector?.units && this.god?.sprite) {
+    // Ghosts pass through everything — their touch kills nothing.
+    if (this.warDirector?.units && this.god?.sprite && !this.god.isGhost) {
       const gx = this.god.sprite.x
       const gy = this.god.sprite.y - 10
       const touchR = 18
@@ -1074,15 +1180,36 @@ export default class WorldScene extends Phaser.Scene {
       this.hpBarFill.width = 80 * Math.max(0, hp / max)
     }
 
-    // Population HUD (only redraw when the number changes)
+    // Population HUD (only redraw when the number changes) + victory watch.
+    // The "ascendant" count is the slice of home villages that have hit
+    // the civilisation threshold; that's the progress bar toward victory.
     const totalPop = this.villages.reduce((sum, v) => sum + Math.floor(v.population), 0)
-    if (totalPop !== this._prevTotalPop) {
+    const homeVillagesAlive = this.villages.filter(v => (v.team || 'home') === 'home' && v.population > 0)
+    const ascendant = homeVillagesAlive.filter(v => v.stage >= ASCENSION_STAGE).length
+    if (totalPop !== this._prevTotalPop || ascendant !== this._prevAscendant) {
       this._prevTotalPop = totalPop
-      const enlightened = this.villages.filter(v => v.stage > 1).length
+      this._prevAscendant = ascendant
+      const totalAlive = homeVillagesAlive.length
       let hudText = `Villages: ${this.villages.length}`
-      if (enlightened > 0) hudText += ` (${enlightened} enlightened)`
+      if (totalAlive > 0) hudText += ` · Ascendant ${ascendant}/${totalAlive}`
       hudText += ` · Pop: ${totalPop}`
       this.villageHUD.setText(hudText)
+      // Tint the label warmer as the player nears victory so the goal
+      // feels within reach in the last stretch.
+      if (totalAlive > 0) {
+        const progress = ascendant / totalAlive
+        const colour = progress >= 1 ? '#ffd166' : progress > 0.66 ? '#e4b660' : '#daa520'
+        this.villageHUD.setColor(colour)
+      }
+    }
+
+    // Victory: every surviving home village is ascendant and we're not
+    // already transitioning. Only checked on the home world so a raid
+    // can never accidentally trigger the end screen.
+    if (!this._victoryTriggered && !this.params?.isRaid &&
+        homeVillagesAlive.length > 0 && ascendant === homeVillagesAlive.length) {
+      this._victoryTriggered = true
+      this._triggerVictory(ascendant)
     }
 
     // Critter AI
@@ -1156,7 +1283,13 @@ export default class WorldScene extends Phaser.Scene {
     }
 
     // Minimap (delta lets it throttle the live texture refresh)
-    if (this.minimap) this.minimap.update(this.god.sprite, dilatedDelta)
+    if (this.minimap) {
+      this.minimap.update(this.god.sprite, dilatedDelta)
+      // Keep the rival-god marker in sync: live position during an
+      // active invasion, cleared the moment the enemy god falls.
+      const enemySprite = (this.enemyGod && this.enemyGod.alive && this.enemyGod.sprite) ? this.enemyGod.sprite : null
+      this.minimap.updateEnemyGodMarker(enemySprite)
+    }
 
     // HUD
     const tileX = Math.floor(this.god.sprite.x / TILE_SIZE)
@@ -1409,18 +1542,42 @@ export default class WorldScene extends Phaser.Scene {
     this.enemyGod = new EnemyGod(this, portalX, portalY - 20, enemySeed)
     this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
 
-    // Spawn a raid wave entering from the portal
+    // Portal invasion: all invaders arrive THROUGH the portal, not at
+    // a random edge, and they trickle in over roughly a minute so the
+    // player has time to react and the battle has dramatic pacing.
+    // Drop size scales with the player's highest home-village stage so
+    // late game feels like an actual Viking siege (180+ units) rather
+    // than a token skirmish. Vanguard arrives immediately; follow-ups
+    // drip through every ~4 s for ~60 s.
     if (this.warDirector) {
-      this.warDirector.launchInvasion(80, this.villages[0])
-      let placed = 0
-      for (const u of this.warDirector.units) {
-        if (u.team === 'enemy' && placed < 18) {
-          u.sprite.x = portalX + (Math.random() - 0.5) * 80
-          u.sprite.y = portalY - 30
-          u.sprite.body?.setVelocity(0, 0)
-          placed++
-        }
-      }
+      const portalTarget = { worldX: portalX, worldY: portalY }
+
+      // Invasion budget: base 60 + 15 per top home stage. Stage 1 = 75;
+      // stage 7 = 165; stage 10 = 210; stage 15 = 285. A proper escalation.
+      const topStage = (this.villages || []).reduce((m, v) => Math.max(m, v.stage || 0), 0)
+      const totalSize = 60 + topStage * 15
+
+      const vanguard = Math.min(12, Math.floor(totalSize * 0.1))
+      this._spawnPortalDrop(portalX, portalY, vanguard, portalTarget)
+
+      const remaining = totalSize - vanguard
+      const totalDrops = 14
+      const perDrop = Math.max(5, Math.ceil(remaining / totalDrops))
+      this._portalDripEvent = this.time.addEvent({
+        delay: 4200,
+        repeat: totalDrops - 1,
+        callback: () => {
+          if (!this.enemyGod?.alive) {
+            this._portalDripEvent?.remove(false)
+            this._portalDripEvent = null
+            return
+          }
+          const batch = perDrop + Math.floor(Math.random() * 3)
+          this._spawnPortalDrop(portalX, portalY, batch, portalTarget)
+          if (this.addJuice) this.addJuice('light')
+          if (this.showMessage) this.showMessage('Fresh invaders spill from the portal.', 1200)
+        },
+      })
     }
 
     // Track the inbound battle: when enemy god dies, reset portal
@@ -1434,6 +1591,11 @@ export default class WorldScene extends Phaser.Scene {
           this._inboundCheckTimer?.destroy()
           this._inboundCheckTimer = null
           this._inboundPortal = null
+          // Stop the drip if it's still running: the fight is over.
+          if (this._portalDripEvent) {
+            this._portalDripEvent.remove(false)
+            this._portalDripEvent = null
+          }
           // Reward: defeating an invading god yields a knowledge tablet
           this.god.highestTablet += 1
           this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
@@ -1450,8 +1612,63 @@ export default class WorldScene extends Phaser.Scene {
         this._inboundCheckTimer?.destroy()
         this._inboundCheckTimer = null
         this._inboundPortal = null
+        if (this._portalDripEvent) {
+          this._portalDripEvent.remove(false)
+          this._portalDripEvent = null
+        }
       }
     })
+  }
+
+  // Spawn a batch of enemy combat units emerging from the portal. The
+  // batch is sharded across multiple home villages (up to 4 distinct
+  // targets) so the invaders feel like a raiding party breaking into
+  // fronts rather than one snake queueing on a single choke point.
+  _spawnPortalDrop(portalX, portalY, count, portalTarget) {
+    if (!this.warDirector || !this.villages?.length) return
+
+    // Rank home villages by stage+pop so high-value targets get hit first.
+    const homeTargets = this.villages
+      .filter(v => (v.team || 'home') === 'home' && !v._destroyed)
+      .sort((a, b) => (b.stage - a.stage) || (b.population - a.population))
+    if (homeTargets.length === 0) return
+    const targets = homeTargets.slice(0, Math.min(4, homeTargets.length))
+
+    const topStage = targets[0].stage || 3
+    const stageCeiling = Math.max(2, Math.min(7, topStage + 1))
+    const enemyColour = 0xff5533
+
+    for (let i = 0; i < count; i++) {
+      const target = targets[i % targets.length]
+      const ox = portalX + (Math.random() - 0.5) * 90
+      const oy = portalY - 26 - Math.random() * 24
+      const unit = new CombatUnit(this, ox, oy, stageCeiling, 'enemy', target, enemyColour)
+      unit.role = 'raider'
+      // Per-unit jitter so they spread out inside the target footprint
+      const jitter = TILE_SIZE * 8
+      unit._patrolTargetX = target.worldX + (Math.random() - 0.5) * jitter
+      unit._patrolTargetY = target.worldY
+      this.warDirector.units.push(unit)
+      if (this.worldLayer && !unit._hasCollider) {
+        unit._hasCollider = true
+        this.physics.add.collider(unit.sprite, this.worldLayer)
+      }
+      // Arrival flash: a quick burst of portal motes per spawn so the
+      // player sees them materialise rather than simply appear.
+      for (let j = 0; j < 6; j++) {
+        const angle = (j / 6) * Math.PI * 2
+        const m = this.add.circle(ox, oy, 2.5, 0x88ccff, 0.9)
+          .setDepth(21).setBlendMode(Phaser.BlendModes.ADD)
+        this.tweens.add({
+          targets: m,
+          x: ox + Math.cos(angle) * 18,
+          y: oy + Math.sin(angle) * 18,
+          alpha: 0, scale: 0.3,
+          duration: 340, ease: 'Quad.easeOut',
+          onComplete: () => m.destroy(),
+        })
+      }
+    }
   }
 
   // Outbound: travel to a freshly seeded raid world. The current world
@@ -1465,7 +1682,78 @@ export default class WorldScene extends Phaser.Scene {
     this._hidePortalPrompt()
     portal.state = 'ACTIVE_OUTBOUND'
     if (this.addJuice) this.addJuice('epic')
+    // Cancel any pending revenge invasion — the scene is about to
+    // teardown and the timer would fire into a dead scene otherwise.
+    if (this._revengeTimers?.length) {
+      for (const t of this._revengeTimers) { try { t.remove(false) } catch {} }
+      this._revengeTimers.length = 0
+    }
+    this._revengeInvasionTimer = null
     this._planeWalkTransition(() => this._performWorldSwap('outbound'))
+  }
+
+  // Arm the delayed revenge invasion. Safe to call multiple times; the
+  // guards below make it a no-op when the rival is dead, peaceful, or
+  // absent. Fires after 2.5 - 4.5 minutes of home-world time so the
+  // player has meaningful breathing space before the hammer falls.
+  _armRevengeInvasion() {
+    // Only home worlds can be invaded.
+    if (this.params?.isRaid) return
+    const state = _mirrorWorldState
+    if (!state) return
+    if (!state.enemyGodAlive) return
+    if (state.enemyGodPersonality !== 'revenge') {
+      // Peace-aligned: give a subtle hint so the player knows they
+      // were spared. Never fire the timer.
+      this.time.delayedCall(6000, () => {
+        if (this.showMessage) {
+          this.showMessage('The rival god broods in their own world.  They do not follow.', 3000)
+        }
+      })
+      return
+    }
+
+    // Delay window tuned for tension rather than attrition: long enough
+    // to build a couple of villages or hunt a tablet, short enough that
+    // the revenge actually lands in the same session.
+    const delayMs = 150000 + Math.random() * 120000 // 2.5 - 4.5 minutes
+    this._revengeTimers = []
+
+    // Staggered warnings so the invasion doesn't land out of nowhere:
+    // a greeting on arrival, a rumble at the halfway mark, an ominous
+    // beat 20 s before the strike, and the strike itself.
+    const schedule = [
+      { at: 6000, fn: () => {
+        if (this.showMessage) this.showMessage('The rival god glares across the void.  They will come for you.', 3200)
+        if (this.ambience?.playBurn) this.ambience.playBurn()
+      }},
+      { at: Math.floor(delayMs * 0.5), fn: () => {
+        if (this.showMessage) this.showMessage('A shadow crosses the land.  The rival draws near.', 2800)
+        if (this.addJuice) this.addJuice('light')
+        if (this.ambience?.playBurn) this.ambience.playBurn()
+      }},
+      { at: delayMs - 20000, fn: () => {
+        if (this.showMessage) this.showMessage('Thunder cracks above the portal henge.  Ready yourself.', 3000)
+        if (this.addJuice) this.addJuice('medium')
+        if (this.ambience?.playGong) this.ambience.playGong()
+      }},
+      { at: delayMs, fn: () => {
+        if (!this.portalHenge) return
+        if (this.enemyGod?.alive) return // already under attack
+        if (this.showMessage) this.showMessage('The rival god seeks vengeance!  Stones tremble at the portal.', 3200)
+        if (this.addJuice) this.addJuice('severe')
+        if (this.ambience?.playGong) this.ambience.playGong()
+        this.time.delayedCall(1800, () => {
+          if (this._beginPortalInbound) this._beginPortalInbound(this.portalHenge)
+        })
+      }},
+    ]
+    for (const step of schedule) {
+      const t = this.time.delayedCall(step.at, step.fn)
+      this._revengeTimers.push(t)
+    }
+    // Keep the final strike pointer too so the old cancel hook keeps working.
+    this._revengeInvasionTimer = this._revengeTimers[this._revengeTimers.length - 1]
   }
 
   // Return: come back home from a raid. Restores the saved home world
@@ -1538,38 +1826,69 @@ export default class WorldScene extends Phaser.Scene {
     const warriorCount = this.bodyguards.length +
       (this.warDirector?.units?.filter(u => u.team === 'home' && u.alive)?.length || 0)
 
-    // Build raid params
-    const raidSeed = Math.floor(Math.random() * 999999)
-    const pair = ELEMENT_PAIRS[raidSeed % ELEMENT_PAIRS.length]
-    const raidParams = {
-      seed: raidSeed,
-      element1: pair[0],
-      element2: pair[1],
-      elementRatio: 3 + (raidSeed % 5),
-      skyCave: 0.3 + Math.random() * 0.4,
-      barrenFertile: 0.4 + Math.random() * 0.3,
-      sparseDense: 0.3 + Math.random() * 0.4,
-      isRaid: true,
-      // Carry the player's god appearance into the raid world
-      godHead: this.params.godHead,
-      godBody: this.params.godBody,
-      godLegs: this.params.godLegs,
+    // Mirror world: derive once per session and cache. All outbound
+    // trips from this home world head to the SAME raid world so the
+    // rival god has continuity and destruction is persistent.
+    if (!_mirrorWorldParams) {
+      _mirrorWorldParams = _deriveMirrorParams(this.params)
     }
 
-    // Restart the scene with raid params; Phaser handles full teardown
     this.scene.restart({
-      params: raidParams,
+      params: { ..._mirrorWorldParams },
       godState: {
         hp: this.god.hp,
         mana: this.god.mana,
         highestTablet: this.god.highestTablet,
       },
       warriorCount: Math.max(6, warriorCount),
+      // Pass through persistent raid state so the new scene can restore
+      // it in _applyPostBuildState (enemy god HP, destroyed villages,
+      // progress toward next god statue).
+      raidState: _mirrorWorldState,
     })
+  }
+
+  // Snapshot the raid world's persistent state before leaving. Called
+  // from _performReturn. Captures enemy god HP (or alive flag), each
+  // village's stage/pop/destroyed flag, and the player's accumulated
+  // statue progress so a subsequent outbound picks up where we left off.
+  _snapshotMirrorState() {
+    if (!this.params?.isRaid) return null
+    const enemyGodAlive = !!this.enemyGod?.alive
+    const enemyGodHp = this.enemyGod?.hp || 0
+    const villageState = (this.villages || []).map(v => ({
+      tileX: v.tileX,
+      tileY: v.tileY,
+      stage: v.stage,
+      population: v.population,
+      belief: v.belief,
+      destroyed: !!v._destroyed,
+    }))
+    // Rival god personality: decided ONCE per rival, preserved for the
+    // life of that rival god. 50/50 between REVENGE (will eventually
+    // invade the player's home) and PEACE (stays home licking wounds).
+    // If a prior snapshot already set it, keep the same verdict so the
+    // rival's disposition doesn't flip between visits.
+    const priorPersonality = _mirrorWorldState?.enemyGodPersonality
+    const enemyGodPersonality = priorPersonality != null
+      ? priorPersonality
+      : (Math.random() < 0.5 ? 'revenge' : 'peace')
+    return {
+      enemyGodAlive,
+      enemyGodHp,
+      enemyGodPersonality,
+      villages: villageState,
+      raidVillagesDestroyed: this._raidVillagesDestroyed || 0,
+    }
   }
 
   _performReturn() {
     if (!_homeWorldSnapshot) return
+
+    // Snapshot the mirror world's state so the next outbound picks up
+    // where we left off — dead enemy gods stay dead, ruined villages
+    // stay ruined, partial statue progress carries forward.
+    _mirrorWorldState = this._snapshotMirrorState()
 
     const snap = _homeWorldSnapshot
     const godStatues = this._godStatueInventory || 0
@@ -1592,28 +1911,58 @@ export default class WorldScene extends Phaser.Scene {
     const godState = this._initGodState
     if (godState) {
       this.god.hp = godState.hp
-      this.god.mana = godState.mana
+      // Refund mana to full when crossing worlds — the walk between
+      // planes is dramatic enough without dumping the player into a
+      // raid with an empty spell bar.
+      this.god.mana = this.god.maxMana
       this.god.highestTablet = godState.highestTablet
       this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
     }
 
     if (this.params?.isRaid) {
       // ── Raid world setup ──
-      // Advance enemy villages to random stages with high population
-      for (const v of this.villages) {
+      const persisted = this._initRaidState
+
+      // Advance enemy villages. If we have persisted state from a prior
+      // visit, restore each village's exact stage/pop/destroyed flag.
+      // Otherwise generate fresh "random but populated" starting state.
+      for (let i = 0; i < this.villages.length; i++) {
+        const v = this.villages[i]
         v.team = 'enemy'
-        const advStage = 3 + Math.floor(Math.random() * 5)
-        for (let s = v.stage; s < advStage; s++) v.receiveTablet()
-        v.population = 500 + Math.floor(Math.random() * 501)
-        v.belief = 60 + Math.random() * 30
+        const saved = persisted?.villages?.[i]
+        if (saved) {
+          // Rebuild to the saved stage so the settlement visually matches.
+          while (v.stage < saved.stage) v.receiveTablet()
+          v.population = saved.population
+          v.belief = saved.belief
+          if (saved.destroyed || saved.population <= 0) {
+            v._destroyed = true
+            v.population = 0
+            // Drop the building sprites so a destroyed village reads
+            // as ruins rather than a silent working town.
+            for (const b of v.buildings) { if (b?.setAlpha) b.setAlpha(0.35) }
+          }
+        } else {
+          const advStage = 3 + Math.floor(Math.random() * 5)
+          for (let s = v.stage; s < advStage; s++) v.receiveTablet()
+          v.population = 500 + Math.floor(Math.random() * 501)
+          v.belief = 60 + Math.random() * 30
+        }
       }
 
-      // Spawn enemy god at a random village
-      const enemySeed = Math.floor(Math.random() * 999999)
-      const spawnVillage = this.villages[Math.floor(Math.random() * this.villages.length)]
-      if (spawnVillage) {
-        this.enemyGod = new EnemyGod(this, spawnVillage.worldX, spawnVillage.worldY - 30, enemySeed)
-        this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
+      // Enemy god: resurrect only if they survived the last visit. If
+      // the god was killed previously they stay dead until the session
+      // ends. This makes the rival god an actual adversary with arc.
+      const enemyGodShouldSpawn = persisted ? persisted.enemyGodAlive : true
+      if (enemyGodShouldSpawn) {
+        const seedForGod = (this.params.seed ^ 0x85ebca6b) >>> 0
+        const spawnVillage = this.villages.find(v => !v._destroyed) || this.villages[0]
+        if (spawnVillage) {
+          this.enemyGod = new EnemyGod(this, spawnVillage.worldX, spawnVillage.worldY - 30, seedForGod)
+          // Persist HP across trips if we have it
+          if (persisted?.enemyGodHp > 0) this.enemyGod.hp = persisted.enemyGodHp
+          this.physics.add.collider(this.enemyGod.sprite, this.worldLayer)
+        }
       }
 
       // Place god at the portal henge (entry point)
@@ -1642,8 +1991,13 @@ export default class WorldScene extends Phaser.Scene {
         }
       }
 
-      // Tracking for god statue progression
-      this._raidVillagesDestroyed = this._initRaidVillagesDestroyed || 0
+      // Tracking for god statue progression. Prefer the persisted
+      // counter from the prior visit so the player picks up where they
+      // left off; otherwise start fresh.
+      const persistedCount = this._initRaidState?.raidVillagesDestroyed
+      this._raidVillagesDestroyed = persistedCount != null
+        ? persistedCount
+        : (this._initRaidVillagesDestroyed || 0)
       this._godStatueInventory = this._initGodStatueInventory || 0
 
       // Activate combat immediately on raid worlds; the war is already happening
@@ -1653,15 +2007,48 @@ export default class WorldScene extends Phaser.Scene {
         this.warDirector.stateTimer = 30000
       }
 
-      this.showMessage('You walk between worlds...', 2400)
+      // Prime the objective HUD from whatever state carried over (scene
+      // restarts pass these through; a fresh raid starts at zero).
+      this._refreshRaidHud()
+
+      this.showMessage('You walk between worlds.  Topple their villages; carry statues home.', 3200)
+
+      // Orient the player: pulse the portal on the minimap for a few
+      // seconds so they can't miss the way home. Raid worlds are
+      // disorienting on arrival; this is a one-shot courtesy.
+      if (this.minimap && this.portalHenge) {
+        const portalDot = this.minimap.addPortalMarker?.(this.portalHenge)
+        if (portalDot?.setScale) {
+          this.tweens.add({
+            targets: portalDot,
+            scale: { from: 1.8, to: 1.0 },
+            duration: 2400,
+            ease: 'Sine.easeOut',
+          })
+        }
+      }
     } else if (_homeWorldSnapshot && godState) {
       // ── Returning home ──
       const earned = this._initGodStatueInventory || 0
       if (earned > 0) {
-        this.showMessage(`${earned} god statue${earned > 1 ? 's' : ''} carried home!`, 2800)
+        this.showMessage(`${earned} god statue${earned > 1 ? 's' : ''} carried home!  The pantheon grows.`, 3400)
+        // Return fanfare: trigger a heavy juice beat and flash the tablet HUD
+        // gold so the reward feels like it earned the trip.
+        this.addJuice('epic')
+        if (this.tabletHUD) {
+          this.tabletHUD.setColor('#ffd166')
+          this.time.delayedCall(1400, () => this.tabletHUD?.setColor('#00ffaa'))
+        }
       } else {
-        this.showMessage('You return to your world.', 2200)
+        this.showMessage('You return empty-handed.  The stones hum with disappointment.', 2400)
       }
+
+      // Revenge watch: if the rival god is alive and vengeful, they
+      // will invade the home world after a delay. Peace-aligned rivals
+      // stay home licking wounds and do not pursue. The timer is armed
+      // on each re-entry; outbounding again cancels it (clean). The
+      // "they live" and "revenge" conditions both have to hold.
+      this._armRevengeInvasion()
 
       // Place god at the portal
       if (this.portalHenge) {
@@ -1680,13 +2067,38 @@ export default class WorldScene extends Phaser.Scene {
     this._raidVillagesDestroyed = (this._raidVillagesDestroyed || 0) + 1
     if (this._raidVillagesDestroyed % 3 === 0) {
       this._godStatueInventory = (this._godStatueInventory || 0) + 1
-      this.showMessage(`God statue earned! (${this._godStatueInventory} total)`, 2200)
+      this.showMessage(`God statue earned! (${this._godStatueInventory} total). Return through the portal.`, 2800)
       this.addJuice('epic')
       if (this.ambience?.playGong) this.ambience.playGong()
+      // Statue burst: briefly flash the raid HUD gold so the reward
+      // registers viscerally on the HUD as well as in the message log.
+      if (this.raidStatusText) {
+        this.raidStatusText.setColor('#ffd166')
+        this.time.delayedCall(1200, () => this.raidStatusText?.setColor('#e4c2a0'))
+      }
     } else {
       const remaining = 3 - (this._raidVillagesDestroyed % 3)
       this.showMessage(`Enemy village falls. ${remaining} more for a god statue.`, 1800)
       this.addJuice('heavy')
+    }
+    this._refreshRaidHud()
+  }
+
+  // Refresh the raid objective HUD text. Called whenever a village
+  // falls or a statue is earned.
+  _refreshRaidHud() {
+    if (!this.raidStatusText) return
+    const felled = this._raidVillagesDestroyed || 0
+    const statues = this._godStatueInventory || 0
+    const totalVillages = this.villages?.length || 0
+    const progressToNext = 3 - (felled % 3)
+    this.raidStatusText.setText(`Villages felled: ${felled} / ${totalVillages} · Statues: ${statues}`)
+    if (this.raidHintText) {
+      if (statues > 0 && progressToNext === 3) {
+        this.raidHintText.setText(`Return through the portal to carry ${statues} statue${statues > 1 ? 's' : ''} home.`)
+      } else {
+        this.raidHintText.setText(`${progressToNext} more village${progressToNext > 1 ? 's' : ''} to topple for the next god statue.`)
+      }
     }
   }
 
@@ -1789,6 +2201,8 @@ export default class WorldScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (pointer) => {
       if (!this.spellBook || pointer.button !== 0) return
+      // Ghosts cannot cast: they can only mourn and wander.
+      if (this.god?.isGhost) return
       const wp = pointer.positionToCamera(this.cameras.main)
       this.spellBook.cast(this, wp.x, wp.y)
     })
@@ -1868,34 +2282,176 @@ export default class WorldScene extends Phaser.Scene {
     })
   }
 
-  respawnGod() {
-    // Gods only resurrect if they still have living followers in this world.
-    // Zero believers across all home villages = permanent god death.
-    const homeVillages = this.villages.filter(v => v.team === 'home' || !v.team)
-    const totalFollowers = homeVillages.reduce((sum, v) => sum + Math.floor(v.population), 0)
-    if (totalFollowers <= 0) {
-      this.addJuice('severe')
-      this.showMessage('Your followers are gone. The god fades into silence.', 5000)
-      // On raid worlds, return home with whatever statues were earned
-      if (this.params?.isRaid && this.portalHenge) {
-        this.time.delayedCall(3000, () => {
-          this._beginPortalReturn(this.portalHenge)
-        })
+  // Victory: civilisation has ascended. Stops combat, freezes the world
+  // in a celebratory tableau, and offers a path back to a fresh creation
+  // screen. Non-destructive — the world remains to wander if the player
+  // doesn't want to start over yet.
+  _triggerVictory(ascendantCount) {
+    // Quiet the battle — no more raids after a won game.
+    if (this.warDirector) {
+      this.warDirector._raidCycleEnabled = false
+      // Politely retire active raiders rather than leaving them dangling.
+      for (const u of this.warDirector.units) {
+        if (u.team === 'enemy' && u.alive) u.takeDamage(9999, null)
       }
-      // On home world, this is game over; return to creation screen
-      if (!this.params?.isRaid) {
-        this.time.delayedCall(4000, () => {
-          this.scene.start('Creation')
-        })
-      }
-      return
+    }
+    if (this.enemyGod?.alive) this.enemyGod.takeDamage(9999)
+
+    this.addJuice('epic')
+    if (this.ambience?.playGong) this.ambience.playGong()
+    // Second gong for weight, half a second later
+    this.time.delayedCall(500, () => {
+      if (this.ambience?.playGong) this.ambience.playGong()
+    })
+
+    // Cinematic pause: gently zoom out so the player sees the scope of
+    // what they built, dilate time so the moment lands.
+    this._playerZoom = 0.75
+    this.camZoomTarget = 0.75
+    this.triggerSlowmo(0.45)
+
+    // Overlay panel
+    const ui = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2)
+      .setScrollFactor(0).setDepth(120).setAlpha(0)
+    const bg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.72)
+    const panel = this.add.rectangle(0, 0, 480, 260, 0x0a0b12, 0.96)
+      .setStrokeStyle(2, 0xe4b660, 0.9)
+    const title = this.add.text(0, -90, 'Ascension', {
+      fontFamily: 'Georgia, serif', fontSize: '34px', color: '#ffd166',
+      stroke: '#3a2a10', strokeThickness: 4,
+    }).setOrigin(0.5).setShadow(3, 5, '#000000', 8, true, true)
+    const body = this.add.text(0, -30, `All ${ascendantCount} of your villages have reached civilisation.\nThe land hums with abundance.`, {
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#e4c2a0',
+      stroke: '#000000', strokeThickness: 2,
+      align: 'center', wordWrap: { width: 420 },
+    }).setOrigin(0.5)
+    const stats = this.add.text(0, 30,
+      `Tablets: ${this.god.highestTablet}    God statues carried home: ${this._godStatueInventory || 0}`, {
+      fontFamily: 'Georgia, serif', fontSize: '11px', color: '#8a9a8a',
+    }).setOrigin(0.5)
+    const hintNew = this.add.text(0, 70, '[ N ] shape a new world', {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#cfd8e0',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5)
+    const hintStay = this.add.text(0, 92, '[ Esc ] remain among your creations', {
+      fontFamily: 'Georgia, serif', fontSize: '11px', color: '#7a8a99',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5)
+    ui.add([bg, panel, title, body, stats, hintNew, hintStay])
+    this._victoryUI = ui
+
+    this.tweens.add({ targets: ui, alpha: 1, duration: 900, ease: 'Quad.easeOut' })
+
+    // Wire hotkeys. Allocate once and remember so we can clean up.
+    const keyN = this.input.keyboard.addKey('N')
+    const keyEsc = this.input.keyboard.addKey('ESC')
+    const newRun = () => {
+      this.scene.start('Creation')
+    }
+    const dismiss = () => {
+      if (!this._victoryUI) return
+      this.tweens.add({
+        targets: this._victoryUI, alpha: 0, duration: 600,
+        onComplete: () => { this._victoryUI?.destroy(); this._victoryUI = null },
+      })
+      // Let the player keep wandering the won world; combat stays off.
+      this.resetCameraFX()
+    }
+    keyN.once('down', newRun)
+    keyEsc.once('down', dismiss)
+  }
+
+  // Ghost wander duration — the god floats as a mourning spirit for
+  // this many ms before the resurrection flash plants them back at a
+  // living village. Tune for mood; 60 s feels like a proper lament.
+  static GHOST_DURATION_MS = 60000
+
+  // Migration tick: fires every ~8 s. Picks a source village with
+  // plenty of surplus population and a destination with headroom,
+  // spawns a traveller sprite that walks between them, and transfers
+  // one pop on arrival. Silently skipped on raid worlds because enemy
+  // villages shouldn't casually exchange citizens with each other
+  // mid-siege.
+  _tickMigration(delta) {
+    if (this.params?.isRaid) return
+    this._migrationTimer = (this._migrationTimer || 0) - delta
+    if (this._migrationTimer > 0) return
+    this._migrationTimer = 8000 + Math.random() * 4000
+
+    const homes = (this.villages || []).filter(v => (v.team || 'home') === 'home' && !v._destroyed)
+    if (homes.length < 2) return
+
+    // Source: bias toward well-populated villages under full capacity
+    // but with enough bodies to spare.
+    const sources = homes.filter(v => v.population > 25)
+    if (sources.length === 0) return
+    const source = sources[Math.floor(Math.random() * sources.length)]
+
+    // Destination: prefer lower-pop villages so migration actually
+    // balances the world rather than piling everyone in one town.
+    const candidates = homes
+      .filter(v => v !== source && v.population > 0)
+      .sort((a, b) => a.population - b.population)
+    if (candidates.length === 0) return
+    // Pick from the lower third so travellers tend to move toward
+    // smaller villages without being perfectly deterministic.
+    const dest = candidates[Math.floor(Math.random() * Math.max(1, Math.ceil(candidates.length / 3)))]
+
+    // Deduct immediately; the visual is just flavour for the transfer.
+    source.population = Math.max(0, source.population - 1)
+
+    // Spawn a lightweight traveller sprite and tween it toward the
+    // destination. On arrival we credit the destination and destroy
+    // the sprite. No physics, no pathfinding — the tween cheats its
+    // way across so the visual is cheap.
+    const travellerKey = this.textures.exists('sb_villager_1') ? 'sb_villager_1' : null
+    let sprite = null
+    if (travellerKey) {
+      sprite = this.add.sprite(source.worldX, source.worldY - 10, travellerKey)
+        .setOrigin(0.5, 1).setDepth(6)
+      // Tint subtly so the traveller reads as different from stationary villagers.
+      sprite.setTint(0xddeedd)
+      const srcH = sprite.height || 100
+      sprite.setScale(14 / srcH)
+      sprite.setFlipX(dest.worldX < source.worldX)
     }
 
+    // Distance is worldX; journey time ~2s + distance-proportional.
+    const dx = dest.worldX - source.worldX
+    const duration = 2200 + Math.min(4000, Math.abs(dx) * 0.35)
+    const finalise = () => {
+      if (!dest._destroyed) {
+        const cap = 1400 // cap headroom defensive; actual cap lives in Village
+        dest.population = Math.min(cap, dest.population + 1)
+      }
+      if (sprite && sprite.destroy) sprite.destroy()
+    }
+    if (sprite) {
+      this.tweens.add({
+        targets: sprite,
+        x: dest.worldX,
+        y: dest.worldY - 10,
+        alpha: { from: 1, to: 0.6 },
+        duration,
+        ease: 'Sine.easeInOut',
+        onComplete: finalise,
+      })
+    } else {
+      this.time.delayedCall(duration, finalise)
+    }
+  }
+
+  // Called the moment the god's HP hits zero (God.takeDamage routes here).
+  // Instead of snapping to a village immediately, enter ghost mode and
+  // arm a resurrect timer. Permadeath only lands if belief craters to
+  // zero during the wander.
+  respawnGod() {
+    if (this.god.isGhost) return // already mourning
     // Severe juice on death; the player should feel the snap.
     this.addJuice('severe')
 
-    // Black flash overlay for a moment of death; fades back in over
-    // ~700ms once the god is back at the home village.
+    // Black flash overlay for the moment of death, then fade to reveal
+    // the ghost.
     if (!this._deathFlash) {
       this._deathFlash = this.add.rectangle(
         GAME_WIDTH / 2, GAME_HEIGHT / 2,
@@ -1903,21 +2459,70 @@ export default class WorldScene extends Phaser.Scene {
         0x000000, 0
       ).setScrollFactor(0).setDepth(70)
     }
-    this._deathFlash.setAlpha(0.85)
+    this._deathFlash.setAlpha(0.95)
     this.tweens.killTweensOf(this._deathFlash)
     this.tweens.add({
-      targets: this._deathFlash,
-      alpha: 0,
-      duration: 700,
-      ease: 'Quad.easeOut',
+      targets: this._deathFlash, alpha: 0, duration: 900, ease: 'Quad.easeOut',
     })
 
-    // Respawn at the nearest living home village
+    this.god.enterGhostMode()
+    this.showMessage('Your body fails.  Wander as spirit until the land calls you back.', 3200)
+    if (this.ambience?.playGong) this.ambience.playGong()
+    // Halo burst at the death point — outward ripple of cold motes so
+    // the moment of transition reads visually even with the black flash.
+    if (this.god.sprite) {
+      for (let i = 0; i < 14; i++) {
+        const angle = (i / 14) * Math.PI * 2
+        const m = this.add.circle(this.god.sprite.x, this.god.sprite.y - 10, 2.2, 0xccddff, 0.9)
+          .setDepth(22).setBlendMode(Phaser.BlendModes.ADD)
+        this.tweens.add({
+          targets: m,
+          x: m.x + Math.cos(angle) * 48,
+          y: m.y + Math.sin(angle) * 36 - 6,
+          alpha: 0, scale: 0.2,
+          duration: 900 + Math.random() * 300,
+          ease: 'Quad.easeOut',
+          onComplete: () => m.destroy(),
+        })
+      }
+    }
+  }
+
+  // Called each frame while the god is ghostly. Counts down the wander
+  // timer and resolves the end state: resurrect if followers remain,
+  // permadeath (creation screen) if belief has fully collapsed.
+  _tickGhostWander(delta) {
+    if (!this.god.isGhost) return
+    this.god._ghostTimer += delta
+    if (this.god._ghostTimer < WorldScene.GHOST_DURATION_MS) return
+
+    const homeVillages = this.villages.filter(v => (v.team || 'home') === 'home')
+    const totalFollowers = homeVillages.reduce((sum, v) => sum + Math.floor(v.population), 0)
+
+    if (totalFollowers <= 0) {
+      // Permadeath: the god has no-one left to call them home.
+      this.addJuice('severe')
+      this.showMessage('Your followers are gone.  The god fades into silence.', 5000)
+      if (this.params?.isRaid && this.portalHenge) {
+        this.time.delayedCall(3000, () => this._beginPortalReturn(this.portalHenge))
+      } else {
+        this.time.delayedCall(4000, () => this.scene.start('Creation'))
+      }
+      // Keep the ghost floating through the fade; don't exit ghost mode.
+      return
+    }
+
+    // Resurrect at the largest living village.
     let bestVillage = null
     let bestPop = 0
     for (const v of homeVillages) {
       if (v.population > bestPop) { bestPop = v.population; bestVillage = v }
     }
+
+    this.god.exitGhostMode()
+    this.god.hp = this.god.maxHp
+    this.god.mana = this.god.maxMana
+
     if (bestVillage) {
       this.god.sprite.x = bestVillage.worldX
       this.god.sprite.y = bestVillage.worldY - TILE_SIZE * 5
@@ -1926,6 +2531,18 @@ export default class WorldScene extends Phaser.Scene {
       this.god.sprite.y = TILE_SIZE * 10
     }
     this.god.sprite.body.setVelocity(0, 0)
-    this.showMessage(`Resurrected. ${totalFollowers} followers remain.`)
+
+    // Gentle fanfare: flash + light juice so the return reads.
+    if (this._deathFlash) {
+      this._deathFlash.setAlpha(0.7)
+      this.tweens.killTweensOf(this._deathFlash)
+      this.tweens.add({
+        targets: this._deathFlash, alpha: 0, duration: 800,
+      })
+    }
+    this.addJuice('heavy')
+    this.showMessage(`Resurrected.  ${totalFollowers} followers remain.`, 2400)
+    if (this.ambience?.playGong) this.ambience.playGong()
+    if (this.ambience?.playMagic) this.ambience.playMagic()
   }
 }

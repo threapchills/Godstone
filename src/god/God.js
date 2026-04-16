@@ -38,6 +38,14 @@ export default class God {
     // State
     this.isInLiquid = false
     this.facingRight = true
+    // Ghost mode: when the god's HP hits zero, rather than snapping back
+    // to a village immediately they wander as a translucent spirit for
+    // ~60 s. Combat, digging, and spell casting are all suppressed while
+    // this flag is true. The scene wires the phase-out timer and the
+    // resurrection into respawnGod().
+    this.isGhost = false
+    this._ghostTimer = 0
+    this._ghostBobPhase = Math.random() * Math.PI * 2
     // Tablets are persistent and level-agnostic. Each pickup increments
     // highestTablet by one; the first one found is level 1, second is
     // level 2, and so on. A village at stage N can advance whenever the
@@ -51,7 +59,8 @@ export default class God {
 
     // Mana: enough for one of each spell (3 total). Regenerates while
     // the god is moving (walking, flying, falling). Full regen from
-    // empty takes about two minutes of constant motion.
+    // empty takes about six seconds of constant motion — fast enough
+    // that combat has rhythm, slow enough that spells still feel weighty.
     this.maxMana = 3
     this.mana = this.maxMana
     this._lastManaPosX = 0
@@ -99,14 +108,24 @@ export default class God {
     const body = this.sprite.body
     const onGround = body.blocked.down
 
+    // Ghost mode: move freely, no gravity, no interactions. The player
+    // can wander the world as a mourner until the timer expires. Skip
+    // the whole combat/dig pipeline.
+    if (this.isGhost) {
+      this._ghostUpdate(time, delta)
+      return
+    }
+
     // Mana regen tied to actual movement (any displacement counts).
     // Stationary god gets nothing; this rewards exploration.
     const dx = this.sprite.x - this._lastManaPosX
     const dy = this.sprite.y - this._lastManaPosY
     const moved = (dx * dx + dy * dy) > 0.25
     if (moved && this.mana < this.maxMana) {
-      // Full bar (3 mana) regenerates over ~120 seconds of motion
-      this.mana = Math.min(this.maxMana, this.mana + (3 / 120) * (delta / 1000))
+      // Full bar (3 mana) regenerates over ~6 seconds of motion. This
+      // gives the player a steady spell cadence without making them
+      // infinite turrets — stationary gods get nothing.
+      this.mana = Math.min(this.maxMana, this.mana + (3 / 6) * (delta / 1000))
     }
     this._lastManaPosX = this.sprite.x
     this._lastManaPosY = this.sprite.y
@@ -332,6 +351,82 @@ export default class God {
     }
   }
 
+  // Put the god in ghost mode. Called by the scene on death so the
+  // player has a chance to say goodbye to whatever they built before
+  // the resurrection flash. The body is suspended and made intangible
+  // so no collisions, no damage, no dig. Gravity is muted and velocity
+  // cleared; ghosts drift rather than fall.
+  enterGhostMode() {
+    if (this.isGhost) return
+    this.isGhost = true
+    this._ghostTimer = 0
+    if (this.sprite) {
+      this.sprite.setAlpha(0.45)
+      this.sprite.setTint(0xdde8ff)
+    }
+    const body = this.sprite.body
+    if (body) {
+      body.setAllowGravity(false)
+      body.setVelocity(0, 0)
+      // Disable terrain collision so the spirit glides through rock.
+      body.checkCollision.none = true
+    }
+  }
+
+  exitGhostMode() {
+    if (!this.isGhost) return
+    this.isGhost = false
+    this._ghostTimer = 0
+    if (this.sprite) {
+      this.sprite.setAlpha(1)
+      this.sprite.clearTint()
+    }
+    const body = this.sprite.body
+    if (body) {
+      body.setAllowGravity(true)
+      body.setGravityY(GRAVITY)
+      body.checkCollision.none = false
+    }
+  }
+
+  // Ghost-mode tick: arrow keys/WASD drift the spirit, space accelerates,
+  // and the sprite bobs for a ghostly feel. No dig, no spell, no damage.
+  _ghostUpdate(time, delta) {
+    const body = this.sprite.body
+    this._ghostTimer += delta
+    this._ghostBobPhase += delta * 0.004
+
+    const SPEED = 120
+    let vx = 0, vy = 0
+    if (this.cursors.left.isDown || this.wasd.left.isDown) vx -= SPEED
+    if (this.cursors.right.isDown || this.wasd.right.isDown) vx += SPEED
+    if (this.cursors.up.isDown || this.wasd.up.isDown || this.spaceKey.isDown) vy -= SPEED
+    if (this.cursors.down.isDown || this.wasd.down.isDown) vy += SPEED
+
+    body.setVelocity(vx, vy)
+
+    // Facing flip + bob
+    if (vx < 0 && this.facingRight) { this.sprite.setFlipX(true); this.facingRight = false }
+    else if (vx > 0 && !this.facingRight) { this.sprite.setFlipX(false); this.facingRight = true }
+    this.sprite.y += Math.sin(this._ghostBobPhase) * 0.35
+
+    // Faint trailing mote every few frames for the spirit look.
+    if (Math.random() < 0.12) {
+      const p = this.scene.add.circle(
+        this.sprite.x + (Math.random() - 0.5) * 8,
+        this.sprite.y - 10 + (Math.random() - 0.5) * 10,
+        1.4 + Math.random(), 0xccddff, 0.7,
+      ).setDepth(9)
+      this.scene.tweens.add({
+        targets: p,
+        y: p.y - 12 - Math.random() * 8,
+        alpha: 0, scale: 0.3,
+        duration: 700 + Math.random() * 300,
+        onComplete: () => p.destroy(),
+      })
+    }
+  }
+
   // Pick up a tablet. Each pickup is automatically the next level in
   // sequence: the first you find is level 1, the second is level 2, etc.
   // Returns the level granted, useful for HUD messaging.
@@ -341,8 +436,9 @@ export default class God {
   }
 
   // Damage with brief invulnerability so a sustained beam doesn't drain
-  // HP in a single frame.
+  // HP in a single frame. Ghosts are intangible and take nothing.
   takeDamage(amount, time = performance.now()) {
+    if (this.isGhost) return
     if (time - this._lastDamageTime < 500) return
     this._lastDamageTime = time
     this.hp = Math.max(0, this.hp - amount)

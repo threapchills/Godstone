@@ -23,30 +23,50 @@ import CombatUnit from './CombatUnit.js'
 // spells) are a separate list on the scene so non-director damage
 // sources can add to it.
 
+// Organic war rhythm. A fresh world opens with an extended PEACE
+// phase (~90 s) so the player has space to explore before the first
+// drums sound; after that the cycle alternates between raids and
+// contemplative lulls. BUILDUP is the "tense interlude" that telegraphs
+// an incoming wave so the player can scramble defences.
 const WAR_CYCLE = {
-  PEACE:    { nextIn: 40000, next: 'BUILDUP' },
-  BUILDUP:  { nextIn: 12000, next: 'RAID' },
-  RAID:     { nextIn: 30000, next: 'PEACE' },
+  PEACE:    { nextIn: 55000, next: 'BUILDUP' },
+  BUILDUP:  { nextIn: 14000, next: 'RAID' },
+  RAID:     { nextIn: 40000, next: 'PEACE' },
 }
 
+// Grace period before the first war drum beats. Long enough that the
+// player can sightsee a few villages and maybe find a tablet before
+// raiders show up; short enough that the world doesn't feel lifeless.
+const FIRST_RAID_GRACE_MS = 90000
+
 // Cap total concurrent combat units so a runaway battle never tanks
-// frame rate. Sky Baby proved 500-ish units is viable; we cap at 300
-// here to leave headroom for villagers, critters, and particles.
-const COMBAT_UNIT_CAP = 300
+// frame rate. Sky Baby proved 500-ish units is viable; we cap at 450
+// here to leave headroom for villagers, critters, and particles while
+// still allowing Viking-scale raids.
+const COMBAT_UNIT_CAP = 450
+
+// Number of distinct target villages a raid wave splits across. Raids
+// used to funnel every unit toward the nearest home village, which
+// produced visible clumping; splitting across N targets makes the
+// band behave like Viking raiders hitting multiple hamlets at once.
+const RAID_TARGET_SPLIT = 4
 
 export default class WarDirector {
   constructor(scene) {
     this.scene = scene
     this.state = 'PEACE'
-    this.stateTimer = WAR_CYCLE.PEACE.nextIn
+    // First state tick is the grace period, not the default PEACE
+    // length, so even players who never open a portal eventually see
+    // war descend on the world.
+    this.stateTimer = FIRST_RAID_GRACE_MS
     this.units = []      // combat-capable CombatUnits (home and enemy)
     this.projectiles = [] // arrows, spells, etc.
     this._nextPatrolCheck = 0
     this._msgShown = false
-    // Automatic raid waves are disabled until the player triggers
-    // their first inbound invasion via the portal. Before that the
-    // world is peaceful exploration only.
-    this._raidCycleEnabled = false
+    // Raids run on an organic cycle from the moment the world is born.
+    // The first portal inbound used to be the gate; now the grace
+    // period handles pacing and the world always rumbles to life.
+    this._raidCycleEnabled = !(scene.params?.isRaid) // raid worlds run their own assault loop below
   }
 
   // Manual trigger: called from portal mechanics (Phase 7) to start a
@@ -80,9 +100,14 @@ export default class WarDirector {
       }
 
       this._nextPatrolCheck -= delta
-      if (this._nextPatrolCheck <= 0 && this.state === 'RAID') {
-        this._nextPatrolCheck = 6000
-        this._dispatchHomePatrols()
+      // During an active enemy-god invasion the patrol rate doubles and
+      // the dispatch point biases toward the rival god so defenders
+      // converge on the threat instead of wandering generically.
+      const invasionActive = !!this.scene.enemyGod?.alive
+      const patrolInterval = invasionActive ? 2500 : 6000
+      if (this._nextPatrolCheck <= 0 && (this.state === 'RAID' || invasionActive)) {
+        this._nextPatrolCheck = patrolInterval
+        this._dispatchHomePatrols(invasionActive ? this.scene.enemyGod : null)
       }
     }
 
@@ -95,6 +120,17 @@ export default class WarDirector {
         this._tickRaidAssaults()
         this._dispatchEnemyDefenders()
       }
+    }
+
+    // Reactive home defence: independently of the raid cycle, any home
+    // village that sees enemies within a short radius spontaneously
+    // trains up a defender or two from its population. This is Mike's
+    // "villagers go off and train to be warriors when population dynamics
+    // demand it" rule — a village under threat stops farming and fights.
+    this._nextHomeDefenceCheck = (this._nextHomeDefenceCheck || 0) - delta
+    if (this._nextHomeDefenceCheck <= 0) {
+      this._nextHomeDefenceCheck = 1500
+      this._trainReactiveDefenders()
     }
 
     // Update combat units
@@ -157,64 +193,114 @@ export default class WarDirector {
     }
   }
 
+  // Flavour text banks. Picking randomly per state transition so the
+  // world feels less mechanical across multiple raid cycles. Sentence
+  // case. No em dashes.
+  static BUILDUP_LINES = [
+    'War drums sound in the distance',
+    'Smoke rises beyond the horizon',
+    'Scouts report a war band approaching',
+    'The wind carries the sound of marching feet',
+    'Ravens circle the edge of the world',
+    'Fires bloom on the far ridge',
+  ]
+  static RAID_LINES = [
+    'Raiders descend on the world',
+    'A war band crashes into your lands',
+    'Steel flashes on the horizon',
+    'The raiders have arrived',
+    'Enemies at the gates',
+  ]
+  static PEACE_LINES = [
+    'The raiders are routed',
+    'Silence falls on the battlefield',
+    'The war band retreats',
+    'Your villages breathe again',
+    'Blood soaks the earth; the fight is done',
+  ]
+
   _onEnterState() {
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
     if (this.state === 'BUILDUP') {
-      if (this.scene.showMessage) this.scene.showMessage('War drums sound in the distance', 2000)
+      if (this.scene.showMessage) this.scene.showMessage(pick(WarDirector.BUILDUP_LINES), 2000)
       if (this.scene.addJuice) this.scene.addJuice('light')
+      if (this.scene.ambience?.playBurn) this.scene.ambience.playBurn()
     } else if (this.state === 'RAID') {
-      if (this.scene.showMessage) this.scene.showMessage('Raiders descend on the world', 2400)
+      if (this.scene.showMessage) this.scene.showMessage(pick(WarDirector.RAID_LINES), 2400)
       if (this.scene.addJuice) this.scene.addJuice('heavy')
+      if (this.scene.ambience?.playGong) this.scene.ambience.playGong()
       this._spawnRaidWave(this._scaledRaidSize())
     } else if (this.state === 'PEACE') {
-      if (this.scene.showMessage) this.scene.showMessage('The raiders are routed', 1800)
+      if (this.scene.showMessage) this.scene.showMessage(pick(WarDirector.PEACE_LINES), 1800)
     }
   }
 
   _scaledRaidSize() {
     // Scale with the highest home village stage so raids track the
-    // player's progression. Early game gets moderate war bands; late
-    // game gets proper incursions with hundreds of warriors.
+    // player's progression. Early game gets respectable war bands;
+    // late game fields proper Viking incursions that swarm multiple
+    // villages at once. Previous scaling capped at ~114 (top stage 7);
+    // boosted so stage 7+ yields ~180 and stage 15+ approaches 300.
     const vs = this.scene.villages || []
     let topStage = 0
     for (const v of vs) if (v.stage > topStage) topStage = v.stage
-    return 30 + topStage * 12
+    return 50 + topStage * 20
   }
 
   _spawnRaidWave(size, sourceVillage = null) {
     if (this.units.length >= COMBAT_UNIT_CAP) return
-    // Spawn from a random edge of the world so the raiders "arrive"
-    // rather than teleport in. In Phase 7 this will be replaced for
-    // portal-driven invasions which enter at the portal henge.
+
     const worldPx = WORLD_WIDTH * TILE_SIZE
-    const edgeX = Math.random() < 0.5 ? 60 * TILE_SIZE : worldPx - 60 * TILE_SIZE
-    const surfaceY = this.scene.worldGrid?.surfaceHeights
-      ? this.scene.worldGrid.surfaceHeights[Math.floor(edgeX / TILE_SIZE)]
-      : WORLD_HEIGHT * 0.2
-
-    // Raiders scale their stage to the home tier so they're a credible
-    // threat. Stage is capped at 7 for natural waves; Phase 7 raid
-    // worlds will override with higher stages.
     const vs = this.scene.villages || []
-    let targetVillage = null
-    let bestDist = Infinity
-    for (const v of vs) {
-      const dx = v.worldX - edgeX
-      const dist = Math.abs(dx)
-      if (dist < bestDist) { bestDist = dist; targetVillage = v }
-    }
-    const raidStage = Math.max(2, Math.min(7, (targetVillage?.stage || 3)))
-    const enemyClothingColour = 0xff5533
+    const homeVillages = vs.filter(v => (v.team || 'home') === 'home' && !v._destroyed)
+    if (homeVillages.length === 0) return
 
-    for (let i = 0; i < size; i++) {
-      if (this.units.length >= COMBAT_UNIT_CAP) break
-      const ox = edgeX + (Math.random() - 0.5) * 80
-      const oy = surfaceY * TILE_SIZE - 20
-      const unit = new CombatUnit(this.scene, ox, oy, raidStage, 'enemy', targetVillage, enemyClothingColour)
-      // Raiders start in raider role so they march on the target
-      unit.role = 'raider'
-      unit._patrolTargetX = targetVillage?.worldX || ox
-      unit._patrolTargetY = targetVillage?.worldY || oy
-      this.units.push(unit)
+    // Pick up to RAID_TARGET_SPLIT distinct home villages as targets.
+    // Sort by stage descending so the richest targets get priority;
+    // early-game raids still just hit the one village, late-game raids
+    // hit several hamlets simultaneously like a proper Viking war band.
+    const ranked = [...homeVillages].sort((a, b) => (b.stage - a.stage) || (b.population - a.population))
+    const targets = ranked.slice(0, Math.min(RAID_TARGET_SPLIT, ranked.length))
+
+    // Choose a base entry edge (raiders "arrive") but ALSO pepper a few
+    // flank entry points across the map so targets on opposite sides of
+    // the world don't get attacked from a single predictable direction.
+    const baseEdgeX = Math.random() < 0.5 ? 60 * TILE_SIZE : worldPx - 60 * TILE_SIZE
+
+    const enemyClothingColour = 0xff5533
+    const perTarget = Math.ceil(size / targets.length)
+
+    for (let t = 0; t < targets.length; t++) {
+      const target = targets[t]
+      // Flanking entry: each target gets its own entry column offset
+      // from the base edge. Early targets spawn near the edge, later
+      // targets spawn closer to the target itself so a multi-front
+      // raid actually happens rather than everyone queueing at one side.
+      const entryBias = t / Math.max(1, targets.length - 1)
+      const entryX = baseEdgeX + (target.worldX - baseEdgeX) * entryBias
+      const entrySurfaceY = this.scene.worldGrid?.surfaceHeights
+        ? this.scene.worldGrid.surfaceHeights[
+            ((Math.floor(entryX / TILE_SIZE)) % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH
+          ]
+        : WORLD_HEIGHT * 0.2
+
+      const raidStage = Math.max(2, Math.min(7, (target.stage || 3)))
+
+      for (let i = 0; i < perTarget; i++) {
+        if (this.units.length >= COMBAT_UNIT_CAP) break
+        // Wide spawn spread so the band doesn't land on the same 3 tiles.
+        const ox = entryX + (Math.random() - 0.5) * 220
+        const oy = entrySurfaceY * TILE_SIZE - 20 - Math.random() * 30
+        const unit = new CombatUnit(this.scene, ox, oy, raidStage, 'enemy', target, enemyClothingColour)
+        unit.role = 'raider'
+        // Per-unit target jitter so raiders don't all converge on the
+        // same one tile inside the village — each aims for a slightly
+        // different spot within the settlement footprint.
+        const jitter = TILE_SIZE * 8
+        unit._patrolTargetX = target.worldX + (Math.random() - 0.5) * jitter
+        unit._patrolTargetY = target.worldY
+        this.units.push(unit)
+      }
     }
 
     // Physics colliders so raiders walk on the tilemap
@@ -229,14 +315,19 @@ export default class WarDirector {
     }
   }
 
-  _dispatchHomePatrols() {
-    // Each home village dispatches up to one combat-capable warrior
-    // per tick while below a cap. These are the defenders / pursuers.
+  // focusTarget: optional entity (e.g. the rival god) to converge patrols on.
+  // When present, freshly dispatched raiders lock their patrol point on the
+  // threat so they march toward the battle instead of aimlessly.
+  _dispatchHomePatrols(focusTarget = null) {
     const vs = this.scene.villages || []
     let homeCombatCount = 0
     for (const u of this.units) if (u.team === 'home') homeCombatCount++
     const cap = Math.min(80, this.units.length + 12)
     if (homeCombatCount >= cap) return
+
+    // An invasion doubles unit count per village so battles feel like
+    // battles instead of singular duels. Capped at 3 per village per tick.
+    const unitsPerVillage = focusTarget ? 3 : 1
 
     for (const v of vs) {
       if ((v.team || 'home') !== 'home') continue
@@ -245,13 +336,80 @@ export default class WarDirector {
       if (this.units.length >= COMBAT_UNIT_CAP) break
 
       const clothing = v.clothingColour || 0x7ad0c0
-      const ox = v.worldX + (Math.random() - 0.5) * TILE_SIZE * 6
-      const oy = v.worldY - 30
-      const unit = new CombatUnit(this.scene, ox, oy, v.stage, 'home', v, clothing)
-      this.units.push(unit)
-      if (this.scene.worldLayer && !unit._hasCollider) {
-        unit._hasCollider = true
-        this.scene.physics.add.collider(unit.sprite, this.scene.worldLayer)
+      for (let k = 0; k < unitsPerVillage; k++) {
+        if (this.units.length >= COMBAT_UNIT_CAP) break
+        const ox = v.worldX + (Math.random() - 0.5) * TILE_SIZE * 6
+        const oy = v.worldY - 30
+        const unit = new CombatUnit(this.scene, ox, oy, v.stage, 'home', v, clothing)
+        // Pull them out of bodyguard mode and point them at the threat.
+        if (focusTarget?.sprite) {
+          unit.role = 'raider'
+          unit._patrolTargetX = focusTarget.sprite.x
+          unit._patrolTargetY = focusTarget.sprite.y
+        }
+        this.units.push(unit)
+        if (this.scene.worldLayer && !unit._hasCollider) {
+          unit._hasCollider = true
+          this.scene.physics.add.collider(unit.sprite, this.scene.worldLayer)
+        }
+      }
+    }
+  }
+
+  // Spontaneous warrior training. Any home village with enemies
+  // within its perimeter and enough people to spare promotes 1-2
+  // villagers into combat units. Population is debited for each
+  // spawn so it feels like the village is genuinely paying the cost
+  // of its defence. Caps keep the battlefield from ballooning.
+  _trainReactiveDefenders() {
+    const vs = this.scene.villages || []
+    if (vs.length === 0) return
+    const threatRadius = TILE_SIZE * 12
+    const threatRadiusSq = threatRadius * threatRadius
+
+    let homeCombatCount = 0
+    for (const u of this.units) if (u.team === 'home' && u.alive) homeCombatCount++
+    if (homeCombatCount >= 120) return
+
+    for (const v of vs) {
+      if ((v.team || 'home') !== 'home') continue
+      if (v.population < 15) continue
+      if (this.units.length >= COMBAT_UNIT_CAP) break
+
+      // Scan for a nearby enemy unit. Break at first hit; we don't need
+      // to know the count, just whether anyone is threatening.
+      let threatened = false
+      for (const u of this.units) {
+        if (!u.alive || u.team !== 'enemy') continue
+        const dx = u.sprite.x - v.worldX
+        const dy = u.sprite.y - v.worldY
+        if (dx * dx + dy * dy < threatRadiusSq) { threatened = true; break }
+      }
+      // Also consider the enemy god a direct threat
+      const enemyGod = this.scene.enemyGod
+      if (!threatened && enemyGod?.alive && enemyGod.sprite) {
+        const dx = enemyGod.sprite.x - v.worldX
+        const dy = enemyGod.sprite.y - v.worldY
+        if (dx * dx + dy * dy < threatRadiusSq) threatened = true
+      }
+      if (!threatened) continue
+
+      // Train a defender. Use the village's stage so equipment matches.
+      const clothing = v.clothingColour || 0x7ad0c0
+      const stage = Math.max(1, v.stage)
+      const count = Math.min(2, Math.floor(v.population / 20))
+      for (let i = 0; i < count; i++) {
+        if (this.units.length >= COMBAT_UNIT_CAP) break
+        const ox = v.worldX + (Math.random() - 0.5) * TILE_SIZE * 5
+        const oy = v.worldY - 30
+        const unit = new CombatUnit(this.scene, ox, oy, stage, 'home', v, clothing)
+        unit.role = 'bodyguard'
+        this.units.push(unit)
+        v.population = Math.max(0, v.population - 1)
+        if (this.scene.worldLayer && !unit._hasCollider) {
+          unit._hasCollider = true
+          this.scene.physics.add.collider(unit.sprite, this.scene.worldLayer)
+        }
       }
     }
   }

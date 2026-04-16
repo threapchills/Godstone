@@ -39,6 +39,13 @@ export function ensureWarriorTexture(scene, stage, clothingColour, hashSeed) {
   return 'sb_villager_1'
 }
 
+// Distance at which villagers notice a nearby enemy CombatUnit and flip
+// into panic/flee mode. Small enough that only genuinely close threats
+// cause mass scatter; large enough that a raid band actually visibly
+// terrifies the settlement.
+const PANIC_RADIUS = 8 * TILE_SIZE
+const PANIC_RADIUS_SQ = PANIC_RADIUS * PANIC_RADIUS
+
 // Lightweight wandering AI using storybook illustration sprites.
 export class WanderingWarrior {
   constructor(scene, x, y, stage, clothingColour, anchorX, spreadPx) {
@@ -68,10 +75,22 @@ export class WanderingWarrior {
     this.speed = baseSpeed + Math.random() * 8
     this.pauseTimer = 0
     this.isPaused = false
+
+    // Panic state. When a hostile CombatUnit comes within PANIC_RADIUS
+    // the villager flees away from them at triple speed, ignoring the
+    // village anchor/spread, and jitters slightly for a frightened read.
+    this._panicking = false
+    this._panicCheckCooldown = 0
+    this._fleeSign = 1 // +1 = flee right, -1 = flee left
+    this._panicJitterPhase = Math.random() * Math.PI * 2
   }
 
   update(delta) {
-    if (!this.isPaused) {
+    this._evaluatePanic(delta)
+
+    if (this._panicking) {
+      this._updatePanic(delta)
+    } else if (!this.isPaused) {
       this.sprite.x += this.direction * this.speed * delta / 1000
       this.sprite.setFlipX(this.direction < 0)
 
@@ -103,6 +122,66 @@ export class WanderingWarrior {
       const fallbackTileY = Math.floor(this.sprite.y / TILE_SIZE)
       const groundTileY = findGroundTileY(grid, tileX, startTileY, fallbackTileY)
       this.sprite.y = groundTileY * TILE_SIZE
+    }
+  }
+
+  // Periodically sample nearby enemy combat units; flip into panic if
+  // one is close enough. Check rate is throttled so we don't walk the
+  // entire unit list every frame per villager — panic checks at ~4 Hz.
+  _evaluatePanic(delta) {
+    this._panicCheckCooldown -= delta
+    if (this._panicCheckCooldown > 0) return
+    this._panicCheckCooldown = 240
+
+    const director = this.scene.warDirector
+    if (!director?.units?.length) {
+      if (this._panicking) this._exitPanic()
+      return
+    }
+
+    // Find the nearest enemy within PANIC_RADIUS. Only enemies trigger;
+    // friendly home warriors patrolling don't scare the villagers.
+    let threatDx = null
+    let bestSq = PANIC_RADIUS_SQ
+    for (const u of director.units) {
+      if (!u.alive || u.team !== 'enemy') continue
+      const dx = u.sprite.x - this.sprite.x
+      const dy = u.sprite.y - this.sprite.y
+      const sq = dx * dx + dy * dy
+      if (sq < bestSq) {
+        bestSq = sq
+        threatDx = dx
+      }
+    }
+
+    if (threatDx != null) {
+      if (!this._panicking) {
+        this._panicking = true
+        this.isPaused = false
+      }
+      // Flee away from the threat
+      this._fleeSign = threatDx > 0 ? -1 : 1
+    } else if (this._panicking) {
+      this._exitPanic()
+    }
+  }
+
+  _exitPanic() {
+    this._panicking = false
+    // Pick a direction based on where they were facing when they stop
+    this.direction = this._fleeSign
+  }
+
+  _updatePanic(delta) {
+    this._panicJitterPhase += delta * 0.02
+    // Panic speed is triple the normal walk rate, with a little jitter.
+    const vx = this._fleeSign * (this.speed * 3 + 6) * delta / 1000
+    this.sprite.x += vx + Math.sin(this._panicJitterPhase) * 0.4
+    this.sprite.setFlipX(this._fleeSign < 0)
+
+    // Small vertical hop every so often to read as frightened motion
+    if (Math.random() < 0.06) {
+      this.sprite.y -= 1.2
     }
   }
 

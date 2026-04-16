@@ -24,7 +24,10 @@ export const COMBAT = {
     touchKillRadius: 18,  // enemy god also kills units on touch
     maxMana: 3,
     boltManaCost: 1,
-    manaRegenPerSecond: 3 / 120,
+    // Full bar in ~6 s: matches the player's regen so the arms race
+    // is fair. Previous 3 / 120 (40 s per mana) effectively disarmed
+    // the enemy god and turned portal invasions into cakewalks.
+    manaRegenPerSecond: 3 / 6,
   },
   bodyguard: {
     maxHpByStage: { 3: 25, 4: 30, 5: 40, 6: 55, 7: 70 },

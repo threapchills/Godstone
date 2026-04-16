@@ -53,6 +53,15 @@ const STAGE_NAMES = [
 const REGRESSION_POP_FLOOR = 3
 const REGRESSION_BELIEF_FLOOR = 8
 
+// Breeding tick interval. Every this-many ms the village rolls for a
+// breeding event; success emits a visible courtship beat (heart motes
+// above a pair of villagers) and adds +1 to the population counter.
+const BREEDING_CHECK_INTERVAL = 4500
+// Base breeding chance per check. Modulated by belief and how much
+// headroom the village has under its pop cap; a full village doesn't
+// breed, a ghost town with low belief barely breeds.
+const BREEDING_BASE_CHANCE = 0.55
+
 // Scale multiplier on procedural building textures.
 // Must be larger than the human-sized god (~20px tall) but smaller
 // than the canopy of a tree (~50px tall). 2.5x puts huts at ~40px,
@@ -129,6 +138,11 @@ export default class Village {
 
     this.buildings = []
     this.villagerSprites = []
+
+    // Breeding timer: counts down each tick; on zero, roll for a
+    // courtship event (see updateBreeding). Randomised initial offset
+    // so each village in the world doesn't breed in lockstep.
+    this._breedingTimer = BREEDING_CHECK_INTERVAL * Math.random()
 
     this._buildSettlement()
 
@@ -336,18 +350,16 @@ export default class Village {
 
   // ── Tablet reception ────────────────────────────────
 
-  // The tablet level this village needs to advance from its current
-  // stage. Stages 1-7 are gated by home-world tablets; stages 8-10 are
-  // gated by god statues carried home from raided worlds. Stage 0 is
-  // the caveman fallback and needs a level 1 tablet like stage 1.
-  // Returns null once the village is fully ascendant.
-  // How many tablets does the god need to have collected before this
-  // village can advance? Simply stage + 1: a stage 0 village needs at
-  // least 1 tablet, a stage 4 village needs at least 5, etc. Tablets
-  // are not pre-ordered; they are counted in pickup order.
+  // The tablet count this village needs to advance one stage. Tablets
+  // are generic "permission tokens": each additional tablet the god
+  // carries unlocks one more stage of advancement for every village
+  // they visit. A stage-1 village needs one tablet to become stage 2;
+  // a stage-7 village needs seven tablets to become stage 8; and so on.
+  // Tablets are persistent, so a late-visited village can skip stages
+  // in sequence. Returns null once the village is fully ascendant.
   get nextRequiredTablet() {
     if (this.stage >= 20) return null
-    return this.stage + 1
+    return this.stage
   }
 
   canAccept(highestTablet) {
@@ -433,11 +445,87 @@ export default class Village {
     this.label.setText(`${this.name} · ${Math.floor(this.population)}`)
   }
 
+  // Periodic breeding tick. Called each frame; the BREEDING_CHECK
+  // timer throttles to ~every 4.5 s. On a successful roll we emit a
+  // short courtship animation (heart motes rising between a pair of
+  // villagers) and bump population by one.
+  updateBreeding(delta) {
+    this._breedingTimer -= delta
+    if (this._breedingTimer > 0) return
+    this._breedingTimer = BREEDING_CHECK_INTERVAL
+
+    // No people, no breeding.
+    if (this.population < 2) return
+    // Destroyed raid villages don't breed.
+    if (this._destroyed) return
+
+    const cap = POP_CAPS[this.stage] ?? POP_CAPS[POP_CAPS.length - 1]
+    const headroom = Math.max(0, 1 - this.population / cap)
+    // Belief correlates with community wellbeing; low-belief villages
+    // breed less, joyful villages breed more. Multiplied by headroom
+    // so a maxed-out village stops reproducing.
+    const beliefFactor = Math.max(0, (this.belief - 20) / 100)
+    const chance = BREEDING_BASE_CHANCE * beliefFactor * headroom
+    if (Math.random() > chance) return
+
+    // Pick a villager sprite as the anchor point for the heart motes.
+    // If no sprites are visible (population below the MAX visible cap),
+    // we just bump pop silently.
+    this.population = Math.min(cap, this.population + 1)
+    this._refreshLabel()
+
+    if (this.villagerSprites.length > 0) {
+      const v = this.villagerSprites[Math.floor(Math.random() * this.villagerSprites.length)]
+      this._spawnHeartBurst(v.sprite.x, v.sprite.y - 10)
+    }
+    // Tiny audio glint, but only if the player is close enough to see
+    // the courtship animation — otherwise breeding chimes would spam
+    // the soundscape as every distant village pairs up off-screen.
+    const godSprite = this.scene.god?.sprite
+    if (godSprite && this.scene.ambience?.playTabletShimmer) {
+      const dx = godSprite.x - this.worldX
+      const dy = godSprite.y - this.worldY
+      if (dx * dx + dy * dy < (TILE_SIZE * 30) * (TILE_SIZE * 30)) {
+        this.scene.ambience.playTabletShimmer()
+      }
+    }
+  }
+
+  // Tiny courtship VFX: three pink hearts drift up and fade. Cheap,
+  // single-use per breeding event, auto-destroys.
+  _spawnHeartBurst(cx, cy) {
+    for (let i = 0; i < 3; i++) {
+      const h = this.scene.add.text(
+        cx + (i - 1) * 3,
+        cy - i * 2,
+        '♥',
+        { fontFamily: 'Georgia, serif', fontSize: '9px', color: '#ff88aa' },
+      ).setOrigin(0.5).setDepth(12).setAlpha(0.9)
+      this.scene.tweens.add({
+        targets: h,
+        y: h.y - 18 - i * 3,
+        alpha: 0,
+        scale: 0.5,
+        duration: 1300 + i * 180,
+        ease: 'Quad.easeOut',
+        onComplete: () => h.destroy(),
+      })
+    }
+  }
+
   // ── Belief ──────────────────────────────────────────
 
   updateBelief(godDistance, delta) {
     const proximityRange = TILE_SIZE * 30
-    if (godDistance < proximityRange) {
+    // Ghost-mode bite: while the god is wandering as a spirit the
+    // villagers sense their absence. Belief drains four times as fast
+    // and proximity no longer restores anything — a disembodied god
+    // cannot comfort their people. Creates genuine tension during the
+    // 60 s ghost wander, especially for low-belief villages.
+    const godIsGhost = !!this.scene?.god?.isGhost
+    if (godIsGhost) {
+      this.belief = Math.max(0, this.belief - 2.0 * delta / 1000)
+    } else if (godDistance < proximityRange) {
       const rate = 5 * (1 - godDistance / proximityRange)
       this.belief = Math.min(100, this.belief + rate * delta / 1000)
     } else {

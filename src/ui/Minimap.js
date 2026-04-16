@@ -265,6 +265,49 @@ export default class Minimap {
     return wrapper
   }
 
+  // Rival god marker: a pulsing red diamond so the player always knows
+  // which way to run (or charge). Unlike static markers this one's
+  // position updates every frame from the scene's enemyGod reference.
+  addEnemyGodMarker() {
+    if (this.enemyDot) return this.enemyDot
+    const dot = this.scene.add.polygon(0, 0, [0, -4, 3, 0, 0, 4, -3, 0], 0xff5544, 1)
+      .setStrokeStyle(1, 0xffaa77, 1)
+    this.container.add(dot)
+    this.scene.tweens.add({
+      targets: dot,
+      scale: { from: 1, to: 1.45 },
+      alpha: { from: 1, to: 0.45 },
+      yoyo: true,
+      repeat: -1,
+      duration: 700,
+    })
+    this.enemyDot = dot
+    return dot
+  }
+
+  removeEnemyGodMarker() {
+    if (!this.enemyDot) return
+    this.scene.tweens.killTweensOf(this.enemyDot)
+    this.enemyDot.destroy()
+    this.enemyDot = null
+  }
+
+  // Called each frame with the rival god's live position so the marker
+  // tracks movement. Accepts either null (rival absent) or a Phaser
+  // sprite.
+  updateEnemyGodMarker(enemySprite) {
+    if (!enemySprite) {
+      if (this.enemyDot) this.removeEnemyGodMarker()
+      return
+    }
+    if (!this.enemyDot) this.addEnemyGodMarker()
+    const enemyTileX = ((enemySprite.x / TILE_SIZE) % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH
+    const enemyTileY = enemySprite.y / TILE_SIZE
+    const p = this.projectLocal(enemyTileX, enemyTileY)
+    this.enemyDot.x = p.x
+    this.enemyDot.y = p.y
+  }
+
   addPortalMarker(portal) {
     if (!portal) return null
     const p = this.projectLocal(portal.tileX, portal.tileY)

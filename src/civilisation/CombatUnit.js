@@ -19,8 +19,12 @@ import Arrow from './Arrow.js'
 
 const ROLE_TRANSITION_MS_MIN = 9000
 const ROLE_TRANSITION_MS_MAX = 18000
-const SEPARATION_RADIUS = 22           // push away if neighbour within this many px
-const SEPARATION_FORCE = 180
+// Separation: units that land inside this radius push each other away.
+// Bumped to 28 px (was 22) so raid bands spread out as they walk rather
+// than piling into the same cluster. Force raised to 260 so the push
+// actually overwhelms patrol-target pull when bodies get stacked.
+const SEPARATION_RADIUS = 28
+const SEPARATION_FORCE = 260
 const MAX_SPEED = 180
 const MELEE_RANGE = 26
 const MELEE_COOLDOWN_MS = 700
@@ -361,14 +365,17 @@ export default class CombatUnit {
       body.setVelocityY(-350)
       this._jumpCooldown = 600 // 600ms between obstacle jumps
     }
-    // Stuck escalation: if stuck for > 1s, start flying to escape
+    // Stuck escalation: if stuck for > 1s, start flying to escape. On
+    // top of the fly burst, if this unit is a raider that's stuck near
+    // its patrol target, pick a fresh target village so the whole band
+    // doesn't queue on one choke point.
     if (this._stuckTimer > 1000 && !this._isFlying) {
       this._isFlying = true
       body.setGravityY(GRAVITY * 0.15)
       body.setVelocityY(-280)
-      // Reverse direction to try a different route
       body.setVelocityX(-body.velocity.x || MAX_SPEED * (Math.random() < 0.5 ? 1 : -1))
       this._stuckTimer = 0
+      if (this.role === 'raider') this._pickPatrolTarget()
     }
     // Return to ground mode when landing after a fly escape
     if (this._isFlying && onGround && this._stuckTimer === 0) {

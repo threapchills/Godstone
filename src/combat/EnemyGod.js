@@ -369,6 +369,15 @@ export default class EnemyGod {
 
     if (!this.spellBook || this.mana < 1) return
 
+    // Pulse the glow aura brighter when the enemy has mana to burn.
+    // Gives the player a cast-is-coming telegraph without a separate
+    // reticle sprite.
+    if (this._glowSprite) {
+      const pulsePhase = Math.sin(this.scene.time.now * 0.012) * 0.5 + 0.5
+      const glowAlpha = 0.25 + pulsePhase * 0.35
+      this._glowSprite.setAlpha(glowAlpha)
+    }
+
     // AI spell priority: ultimate > tactical > offensive
     // Try highest-impact spell first, fall back to workhorse
     const target = godSprite
@@ -395,6 +404,7 @@ export default class EnemyGod {
         if (this.spellBook.cast(this.scene, tx, ty)) {
           this.mana = Math.max(0, this.mana - spell.manaCost)
           cast = true
+          this._flashCastBurst()
           break
         }
       }
@@ -405,6 +415,35 @@ export default class EnemyGod {
 
     // Tick spell cooldowns
     this.spellBook.update(0)
+  }
+
+  // A quick burst of additive motes when the enemy fires a spell.
+  // Pure feedback — no damage, no logic — it just makes the cast
+  // readable so the player has a chance to react.
+  _flashCastBurst() {
+    if (!this.scene || !this.sprite) return
+    const cx = this.sprite.x
+    const cy = this.sprite.y - this.sprite.height * 0.55
+    const colours = [0xff7733, 0xffaa44, 0xffeeaa]
+    for (let i = 0; i < 9; i++) {
+      const angle = (i / 9) * Math.PI * 2
+      const speed = 40 + Math.random() * 30
+      const m = this.scene.add.circle(cx, cy, 2.2 + Math.random(), colours[i % colours.length], 1)
+        .setDepth(22)
+        .setBlendMode(Phaser.BlendModes.ADD)
+      this.scene.tweens.add({
+        targets: m,
+        x: cx + Math.cos(angle) * speed,
+        y: cy + Math.sin(angle) * speed,
+        alpha: 0,
+        scale: 0.2,
+        duration: 450 + Math.random() * 200,
+        ease: 'Quad.easeOut',
+        onComplete: () => m.destroy(),
+      })
+    }
+    // Soft camera nudge so big casts register without drowning smaller beats.
+    if (this.scene.addTrauma) this.scene.addTrauma(0.08)
   }
 
   _flee(body, onGround, dx, dy) {

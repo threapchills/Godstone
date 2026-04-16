@@ -17,19 +17,191 @@ const TIPS = [
   'God statues unlock civilisation tiers beyond stage 7',
 ]
 
+// Two-phase boot: the first preload pulls in only three tiny images
+// (mountains, clouds, runes) so the loading screen can paint almost
+// immediately. The heavy game assets are queued in create() and loaded
+// afterward, with the progress bar driven by that second pass. This
+// prevents the "blank screen for ages, then a near-full progress bar
+// for a split second" experience that previously leaked during the
+// large initial load.
+
 export default class BootScene extends Phaser.Scene {
   constructor() {
     super({ key: 'Boot' })
   }
 
   preload() {
-    // --- Minimal assets loaded inline for the loading screen itself ---
-    // Mountains and clouds for the backdrop (small files, load fast)
+    // Phase 1: minimal UI assets ONLY. These three files are each a
+    // few hundred KB at most; they land in ~1 s on any connection and
+    // the loading screen paints as soon as create() runs.
     this.load.image('dist_mountains', 'assets/storybook_overhaul/distant_mountains.png')
     this.load.image('fluffy_clouds', 'assets/storybook_overhaul/fluffy_clouds.png')
     this.load.image('sb_magic_runes', 'assets/storybook_overhaul/magic_runes.png')
+  }
 
-    // --- All game assets ---
+  create() {
+    const cx = GAME_WIDTH / 2
+    const cy = GAME_HEIGHT / 2
+
+    // Dark gradient background
+    this.cameras.main.setBackgroundColor('#0a0b12')
+
+    // Distant mountains silhouette at the bottom
+    if (this.textures.exists('dist_mountains')) {
+      this.add.image(cx, GAME_HEIGHT - 20, 'dist_mountains')
+        .setOrigin(0.5, 1).setScale(1.4).setAlpha(0.25).setTint(0x2a3a5a)
+    }
+
+    // Drifting clouds, very subtle
+    if (this.textures.exists('fluffy_clouds')) {
+      const cloud = this.add.image(cx + 100, cy - 80, 'fluffy_clouds')
+        .setOrigin(0.5).setScale(1.2).setAlpha(0.12).setTint(0x4a5a8a)
+      this.tweens.add({
+        targets: cloud,
+        x: cx - 100,
+        duration: 18000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      })
+    }
+
+    // Floating runes behind the title
+    if (this.textures.exists('sb_magic_runes')) {
+      const runes = this.add.image(cx, cy - 60, 'sb_magic_runes')
+        .setOrigin(0.5).setScale(0.6).setAlpha(0.08)
+      this.tweens.add({
+        targets: runes,
+        alpha: 0.15,
+        scale: 0.65,
+        duration: 3000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      })
+    }
+
+    // Title
+    this.add.text(cx, cy - 100, 'GODSTONE', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '62px',
+      color: '#e4b660',
+      stroke: '#3a2a10',
+      strokeThickness: 6,
+    }).setOrigin(0.5).setShadow(3, 5, '#000000', 8, true, true)
+
+    // Tagline
+    this.add.text(cx, cy - 55, 'Shape your world.  Build civilisations.  Conquer the omniverse.', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '13px',
+      color: '#7a8a6a',
+      fontStyle: 'italic',
+    }).setOrigin(0.5)
+
+    // Progress bar track
+    const barWidth = 280
+    const barHeight = 6
+    const barX = cx - barWidth / 2
+    const barY = cy + 20
+
+    this.add.graphics()
+      .fillStyle(0x1a1c2a, 0.9)
+      .fillRoundedRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, 4)
+      .lineStyle(1, 0x3a4a5a, 0.6)
+      .strokeRoundedRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, 4)
+
+    this.progressFill = this.add.graphics()
+    this.progressGlow = this.add.graphics()
+
+    // Status text
+    this.statusText = this.add.text(cx, barY + 22, 'Preparing the altar...', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '12px',
+      color: '#5a6a7a',
+    }).setOrigin(0.5)
+
+    // Cycling tips
+    this.tipText = this.add.text(cx, cy + 80, TIPS[0], {
+      fontFamily: 'Georgia, serif',
+      fontSize: '11px',
+      color: '#4a5a6a',
+      fontStyle: 'italic',
+    }).setOrigin(0.5)
+
+    this._tipIndex = 0
+    this.time.addEvent({
+      delay: 3000,
+      loop: true,
+      callback: () => {
+        this._tipIndex = (this._tipIndex + 1) % TIPS.length
+        this.tweens.add({
+          targets: this.tipText,
+          alpha: 0,
+          duration: 300,
+          onComplete: () => {
+            this.tipText.setText(TIPS[this._tipIndex])
+            this.tweens.add({ targets: this.tipText, alpha: 1, duration: 300 })
+          },
+        })
+      },
+    })
+
+    // Orbiting motes around the title for atmosphere
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2
+      const radius = 140 + Math.random() * 40
+      const mote = this.add.circle(
+        cx + Math.cos(angle) * radius,
+        cy - 80 + Math.sin(angle) * radius * 0.35,
+        1.5, 0xe4b660, 0.4,
+      ).setBlendMode(1) // ADD
+      this.tweens.add({
+        targets: mote,
+        x: cx + Math.cos(angle + Math.PI) * radius,
+        y: cy - 80 + Math.sin(angle + Math.PI) * radius * 0.35,
+        duration: 6000 + Math.random() * 3000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      })
+    }
+
+    // Store bar geometry
+    this._barX = barX
+    this._barY = barY
+    this._barWidth = barWidth
+    this._barHeight = barHeight
+
+    this._displayProgress = 0
+    this._targetProgress = 0
+    this._ready = false
+    this._progress = 0
+
+    // Phase 2: queue all the real game assets and kick off a fresh
+    // Loader pass so the progress bar reflects genuine download state
+    // rather than a purely cosmetic fill.
+    this._queueGameAssets()
+    this.load.on('progress', (value) => {
+      this._progress = value
+      this._targetProgress = value
+    })
+    this.load.on('complete', () => {
+      this._progress = 1
+      this._targetProgress = 1
+      // Small pacing beat so the "Ready" status is readable before the
+      // fade to Creation kicks in. Without this the bar's final fill and
+      // the scene transition can feel simultaneous.
+      this.time.delayedCall(500, () => {
+        this._ready = true
+      })
+    })
+    this.load.start()
+  }
+
+  // Queue the entire game asset catalogue on the existing Loader. The
+  // Loader was already created by Phaser for phase 1 but is idle now,
+  // so we can pile on more requests and restart it.
+  _queueGameAssets() {
     // Environment
     this.load.image('sb_tileset', 'assets/environment/island_tileset.png')
     this.load.image('sb_tree', 'assets/backgrounds/tree-variant1.png')
@@ -122,164 +294,16 @@ export default class BootScene extends Phaser.Scene {
     for (const part of ALL_GOD_PARTS) {
       this.load.image(part.key, part.path)
     }
-
-    // Track loading progress
-    this.load.on('progress', (value) => {
-      this._progress = value
-    })
-  }
-
-  create() {
-    const cx = GAME_WIDTH / 2
-    const cy = GAME_HEIGHT / 2
-
-    // Dark gradient background
-    this.cameras.main.setBackgroundColor('#0a0b12')
-
-    // Distant mountains silhouette at the bottom
-    if (this.textures.exists('dist_mountains')) {
-      this.add.image(cx, GAME_HEIGHT - 20, 'dist_mountains')
-        .setOrigin(0.5, 1).setScale(1.4).setAlpha(0.25).setTint(0x2a3a5a)
-    }
-
-    // Drifting clouds, very subtle
-    if (this.textures.exists('fluffy_clouds')) {
-      const cloud = this.add.image(cx + 100, cy - 80, 'fluffy_clouds')
-        .setOrigin(0.5).setScale(1.2).setAlpha(0.12).setTint(0x4a5a8a)
-      this.tweens.add({
-        targets: cloud,
-        x: cx - 100,
-        duration: 18000,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
-      })
-    }
-
-    // Floating runes behind the title
-    if (this.textures.exists('sb_magic_runes')) {
-      const runes = this.add.image(cx, cy - 60, 'sb_magic_runes')
-        .setOrigin(0.5).setScale(0.6).setAlpha(0.08)
-      this.tweens.add({
-        targets: runes,
-        alpha: 0.15,
-        scale: 0.65,
-        duration: 3000,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
-      })
-    }
-
-    // Title
-    this.add.text(cx, cy - 100, 'GODSTONE', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '62px',
-      color: '#e4b660',
-      stroke: '#3a2a10',
-      strokeThickness: 6,
-    }).setOrigin(0.5).setShadow(3, 5, '#000000', 8, true, true)
-
-    // Tagline
-    this.add.text(cx, cy - 55, 'Shape your world. Build civilisations. Conquer the omniverse.', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '13px',
-      color: '#7a8a6a',
-      fontStyle: 'italic',
-    }).setOrigin(0.5)
-
-    // Progress bar track
-    const barWidth = 280
-    const barHeight = 6
-    const barX = cx - barWidth / 2
-    const barY = cy + 20
-
-    this.add.graphics()
-      .fillStyle(0x1a1c2a, 0.9)
-      .fillRoundedRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, 4)
-      .lineStyle(1, 0x3a4a5a, 0.6)
-      .strokeRoundedRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, 4)
-
-    this.progressFill = this.add.graphics()
-    this.progressGlow = this.add.graphics()
-
-    // Status text
-    this.statusText = this.add.text(cx, barY + 22, 'Preparing...', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '12px',
-      color: '#5a6a7a',
-    }).setOrigin(0.5)
-
-    // Cycling tips
-    this.tipText = this.add.text(cx, cy + 80, TIPS[0], {
-      fontFamily: 'Georgia, serif',
-      fontSize: '11px',
-      color: '#4a5a6a',
-      fontStyle: 'italic',
-    }).setOrigin(0.5)
-
-    this._tipIndex = 0
-    this.time.addEvent({
-      delay: 3000,
-      loop: true,
-      callback: () => {
-        this._tipIndex = (this._tipIndex + 1) % TIPS.length
-        this.tweens.add({
-          targets: this.tipText,
-          alpha: 0,
-          duration: 300,
-          onComplete: () => {
-            this.tipText.setText(TIPS[this._tipIndex])
-            this.tweens.add({ targets: this.tipText, alpha: 1, duration: 300 })
-          },
-        })
-      },
-    })
-
-    // Orbiting motes around the title for atmosphere
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2
-      const radius = 140 + Math.random() * 40
-      const mote = this.add.circle(
-        cx + Math.cos(angle) * radius,
-        cy - 80 + Math.sin(angle) * radius * 0.35,
-        1.5, 0xe4b660, 0.4,
-      ).setBlendMode(1) // ADD
-      this.tweens.add({
-        targets: mote,
-        x: cx + Math.cos(angle + Math.PI) * radius,
-        y: cy - 80 + Math.sin(angle + Math.PI) * radius * 0.35,
-        duration: 6000 + Math.random() * 3000,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
-      })
-    }
-
-    // Store bar geometry
-    this._barX = barX
-    this._barY = barY
-    this._barWidth = barWidth
-    this._barHeight = barHeight
-
-    // Animate the loading bar (assets are already loaded by preload;
-    // this simulates a smooth fill then transitions)
-    this._displayProgress = 0
-    this._targetProgress = 1.0
-    this._ready = false
-
-    // Small delay so the screen paints before we transition
-    this.time.delayedCall(800, () => {
-      this._ready = true
-    })
   }
 
   update() {
     if (!this.progressFill) return
 
-    // Smooth progress interpolation
-    const target = this._ready ? this._targetProgress : (this._progress || 0)
-    this._displayProgress += (target - this._displayProgress) * 0.06
+    // Smooth progress interpolation — the target comes directly from
+    // the Phaser Loader's progress events now, so the bar moves in
+    // lockstep with real download state.
+    const target = this._targetProgress || 0
+    this._displayProgress += (target - this._displayProgress) * 0.08
 
     const fill = this._displayProgress
     const w = fill * this._barWidth
@@ -298,20 +322,23 @@ export default class BootScene extends Phaser.Scene {
     }
 
     // Status text updates
-    if (fill < 0.3) {
+    if (fill < 0.25) {
       this.statusText.setText('Gathering elements...')
-    } else if (fill < 0.6) {
+    } else if (fill < 0.55) {
       this.statusText.setText('Weaving the terrain...')
-    } else if (fill < 0.9) {
+    } else if (fill < 0.85) {
       this.statusText.setText('Awakening the world...')
+    } else if (fill < 0.99) {
+      this.statusText.setText('Kindling the hearth...')
     } else {
       this.statusText.setText('Ready')
     }
 
-    // Transition to CreationScene once the bar fills
-    if (this._ready && this._displayProgress > 0.98 && !this._transitioning) {
+    // Transition to CreationScene once loading finishes and the bar
+    // has visibly filled. The _ready flag is set after a short beat so
+    // the final state is readable.
+    if (this._ready && this._displayProgress > 0.985 && !this._transitioning) {
       this._transitioning = true
-      // Fade out gracefully
       this.cameras.main.fadeOut(600, 0, 0, 0)
       this.cameras.main.once('camerafadeoutcomplete', () => {
         this.scene.start('Creation')
