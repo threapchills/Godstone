@@ -32,20 +32,38 @@ export default class SpellBar {
       strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(50)
 
-    // Mana bar
+    // Mana bar. Segment ticks match the god's pool size (6 after the
+    // fun pass) so each notch reads as one cast.
     const manaW = totalW
     const manaY = baseY - 26
+    const manaSegments = scene.god?.maxMana || 6
     this.manaBack = scene.add.rectangle(GAME_WIDTH / 2, manaY, manaW, 4, 0x222244, 0.85)
       .setScrollFactor(0).setDepth(50)
     this.manaFill = scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2, manaY, manaW, 4, 0x4488dd, 1)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
     this.manaTicks = []
-    for (let i = 1; i < 3; i++) {
+    for (let i = 1; i < manaSegments; i++) {
       this.manaTicks.push(
-        scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / 3), manaY, 1, 4, 0x000000, 0.6)
+        scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2 + (manaW * i / manaSegments), manaY, 1, 4, 0x000000, 0.6)
           .setScrollFactor(0).setDepth(52)
       )
     }
+
+    // Wrath meter: gold bar above the mana bar. Fills from essence;
+    // at capacity it pulses and names its hotkey so the player always
+    // knows the nuke is ready.
+    const wrathY = manaY - 8
+    this.wrathBack = scene.add.rectangle(GAME_WIDTH / 2, wrathY, manaW, 4, 0x332211, 0.85)
+      .setScrollFactor(0).setDepth(50)
+    this.wrathFill = scene.add.rectangle(GAME_WIDTH / 2 - manaW / 2, wrathY, 0, 4, 0xddaa33, 1)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
+    this.wrathLabel = scene.add.text(GAME_WIDTH / 2 + manaW / 2 + 6, wrathY, '', {
+      fontFamily: 'Georgia, serif',
+      fontSize: '9px',
+      color: '#ffd166',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(51)
 
     for (let i = 0; i < SLOT_COUNT; i++) {
       const x = baseX + i * (SLOT_W + SLOT_GAP)
@@ -76,7 +94,10 @@ export default class SpellBar {
   }
 
   getAllObjects() {
-    const objs = [this.label, this.manaBack, this.manaFill, ...this.manaTicks]
+    const objs = [
+      this.label, this.manaBack, this.manaFill, ...this.manaTicks,
+      this.wrathBack, this.wrathFill, this.wrathLabel,
+    ]
     for (const s of this.slots) objs.push(s.back, s.icon, s.cdMask, s.hotkey)
     return objs
   }
@@ -156,6 +177,26 @@ export default class SpellBar {
       const totalW = this.manaBack.width
       const fraction = Math.max(0, Math.min(1, god.mana / god.maxMana))
       this.manaFill.width = totalW * fraction
+    }
+
+    // Wrath meter readout. Three states: charging (quiet gold),
+    // ready (pulsing, labelled), avatar active (white-hot countdown).
+    if (god && this.wrathFill) {
+      const totalW = this.wrathBack.width
+      if (god.isAvatar) {
+        const remaining = Math.max(0, god.avatarTimer / 10000)
+        this.wrathFill.width = totalW * remaining
+        this.wrathFill.fillColor = 0xffffff
+        this.wrathLabel.setText('AVATAR')
+      } else {
+        const fraction = Math.max(0, Math.min(1, (god.wrath || 0) / (god.maxWrath || 100)))
+        this.wrathFill.width = totalW * fraction
+        const ready = fraction >= 1
+        const pulse = ready ? (0.6 + 0.4 * Math.abs(Math.sin(this.scene.time.now * 0.006))) : 1
+        this.wrathFill.fillColor = ready ? 0xffd166 : 0xddaa33
+        this.wrathFill.setAlpha(pulse)
+        this.wrathLabel.setText(ready ? '[Q]' : '')
+      }
     }
 
     for (let i = 0; i < this.slots.length; i++) {

@@ -216,6 +216,11 @@ export default class EnemyGod {
     if (this.scene.addJuice) this.scene.addJuice('epic')
     if (this.scene.showMessage) this.scene.showMessage('A rival god falls', 2200)
     if (this.scene.ambience?.playGong) this.scene.ambience.playGong()
+    // A deicide is the biggest single payout in the game: a shower of
+    // essence that fills a healthy slice of the wrath meter.
+    if (this.scene.spawnEssence && this.sprite) {
+      this.scene.spawnEssence(this.sprite.x, this.sprite.y - 14, 16)
+    }
     if (this.sprite) {
       this.scene.tweens.add({
         targets: this.sprite,

@@ -162,6 +162,9 @@ export default class CombatUnit {
 
   _die() {
     this.alive = false
+    // Reward hook: the scene pays out essence and advances the kill
+    // combo. Fired before the sprite fades so the position is valid.
+    if (this.scene.onUnitKilled) this.scene.onUnitKilled(this)
     // GNARLY death explosion: massive blood burst, screen punch
     if (this.sprite) {
       // Main blood burst: lots of particles for a visceral splatter

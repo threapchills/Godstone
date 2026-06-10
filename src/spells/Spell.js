@@ -88,14 +88,26 @@ function carve(scene, x, y, radius) {
   }
 }
 
+// Critical strikes apply only to the player's meaningful hits (damage
+// of at least 3 in a single application) so fractional zone ticks never
+// crit-spam. The 15% rate is high enough to feel frequent without
+// turning every cast into a slot machine.
+const CRIT_CHANCE = 0.15
+const CRIT_MULTIPLIER = 2
+
 function damageInRadius(scene, x, y, radius, damage, team) {
   const r2 = radius * radius
+  const playerCast = team !== 'enemy'
   // Enemy god
   if (scene.enemyGod?.alive && scene.enemyGod.sprite) {
     const eg = scene.enemyGod.sprite
     const dx = eg.x - x, dy = (eg.y - 12) - y
-    if (dx * dx + dy * dy <= r2 && team !== 'enemy') {
-      scene.damageEnemyGod(damage)
+    if (dx * dx + dy * dy <= r2 && playerCast) {
+      let dmg = damage
+      let crit = false
+      if (damage >= 3 && Math.random() < CRIT_CHANCE) { crit = true; dmg = damage * CRIT_MULTIPLIER }
+      scene.damageEnemyGod(dmg)
+      if (scene.showDamageNumber) scene.showDamageNumber(eg.x, eg.y - 18, dmg, crit)
     }
   }
   // Player god (for enemy spells)
@@ -114,7 +126,18 @@ function damageInRadius(scene, x, y, radius, damage, team) {
       if (team === 'home' && u.team === 'home') continue
       if (team === 'enemy' && u.team === 'enemy') continue
       const dx = u.sprite.x - x, dy = u.sprite.y - y
-      if (dx * dx + dy * dy <= r2) u.takeDamage(damage)
+      if (dx * dx + dy * dy <= r2) {
+        let dmg = damage
+        let crit = false
+        if (playerCast && damage >= 3 && Math.random() < CRIT_CHANCE) {
+          crit = true
+          dmg = damage * CRIT_MULTIPLIER
+        }
+        u.takeDamage(dmg)
+        if (playerCast && scene.showDamageNumber) {
+          scene.showDamageNumber(u.sprite.x, u.sprite.y - 12, dmg, crit)
+        }
+      }
     }
   }
   // Critters

@@ -12,8 +12,11 @@ export const GAME_HEIGHT = 640
 
 // Physics
 export const GRAVITY = 800
-export const GOD_SPEED = 160       // was 200; slightly slower base pace
-export const GOD_JUMP = -330       // proportional to speed reduction
+// Pace tuned upward in the fun pass: the god should feel like the most
+// powerful thing in the world to pilot, and 160 read as a stroll. 175
+// keeps the world readable while giving traversal proper momentum.
+export const GOD_SPEED = 175
+export const GOD_JUMP = -350
 export const GOD_FLY_SPEED = -170
 
 // Elements

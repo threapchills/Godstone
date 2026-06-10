@@ -6,10 +6,18 @@ import { compositeGod, COMPOSITE_W, COMPOSITE_H, GOD_DISPLAY_SCALE } from './God
 import { COMBAT } from '../combat/Combat.js'
 
 const FLAP_IMPULSE = -220       // upward burst per space press
-const FLAP_COOLDOWN = 180       // ms between flaps
+const FLAP_COOLDOWN = 150       // ms between flaps; quicker cadence for snappier flight
 const DIG_RATE = 100            // ms between dig ticks when held
-const AIR_CONTROL = 0.85        // horizontal speed multiplier in air
+const AIR_CONTROL = 0.94        // near-full air authority; a god is not a passenger
 const COYOTE_TIME = 80          // ms of grace after walking off edge
+
+// Ground slam: pressing down while airborne turns the god into a
+// meteor. The dive speed is high enough to read as a deliberate attack
+// rather than a fast fall, and the landing resolves in the scene
+// (crater, damage, essence) so all the world-facing effects live in
+// one place.
+const SLAM_DIVE_SPEED = 760
+const SLAM_MIN_AIR_TIME = 120   // ms airborne before a slam can trigger
 
 export default class God {
   constructor(scene, x, y, params) {
@@ -57,14 +65,28 @@ export default class God {
     this.hp = this.maxHp
     this._lastDamageTime = 0
 
-    // Mana: enough for one of each spell (3 total). Regenerates while
-    // the god is moving (walking, flying, falling). Full regen from
-    // empty takes about six seconds of constant motion — fast enough
-    // that combat has rhythm, slow enough that spells still feel weighty.
-    this.maxMana = 3
+    // Mana: doubled from the original 3 in the fun pass. The old pool
+    // starved the most enjoyable system in the game; six casts of
+    // headroom plus essence refunds keeps spells flowing without making
+    // the god an infinite turret.
+    this.maxMana = 6
     this.mana = this.maxMana
     this._lastManaPosX = 0
     this._lastManaPosY = 0
+
+    // Divine wrath: charged by collecting essence motes (digging,
+    // kills, tablets). At 100 the player can trigger avatar form via Q:
+    // a short window of free casting and reduced cooldowns. The meter
+    // and the avatar timer are read by SpellBook and SpellBar.
+    this.wrath = 0
+    this.maxWrath = 100
+    this.avatarTimer = 0          // ms remaining in avatar form
+    this.isAvatar = false
+
+    // Ground slam state. Armed by pressing down while airborne; the
+    // scene resolves the landing impact.
+    this.isSlamming = false
+    this._airTime = 0
     this.lastFlapTime = 0
     this.lastDigTime = 0
     this.coyoteTimer = 0
@@ -116,23 +138,50 @@ export default class God {
       return
     }
 
-    // Mana regen tied to actual movement (any displacement counts).
-    // Stationary god gets nothing; this rewards exploration.
+    // Mana regen: movement charges fast, stillness charges slowly.
+    // The old all-or-nothing rule meant a player standing their ground
+    // in a battle was punished for not jogging in circles; a trickle
+    // while stationary keeps spells available without removing the
+    // incentive to stay mobile.
     const dx = this.sprite.x - this._lastManaPosX
     const dy = this.sprite.y - this._lastManaPosY
     const moved = (dx * dx + dy * dy) > 0.25
-    if (moved && this.mana < this.maxMana) {
-      // Full bar (3 mana) regenerates over ~6 seconds of motion. This
-      // gives the player a steady spell cadence without making them
-      // infinite turrets — stationary gods get nothing.
-      this.mana = Math.min(this.maxMana, this.mana + (3 / 6) * (delta / 1000))
+    if (this.mana < this.maxMana) {
+      const regenPerSecond = moved ? 1.0 : 0.2
+      this.mana = Math.min(this.maxMana, this.mana + regenPerSecond * (delta / 1000))
     }
     this._lastManaPosX = this.sprite.x
     this._lastManaPosY = this.sprite.y
 
+    // Avatar form countdown. While active the god glows gold and the
+    // SpellBook waives mana costs; the visual pulse keeps the player
+    // aware the window is open without a dedicated HUD timer.
+    if (this.isAvatar) {
+      this.avatarTimer -= delta
+      const pulse = 0.75 + 0.25 * Math.sin(time * 0.02)
+      this.sprite.setTint(Phaser.Display.Color.GetColor(
+        255, Math.floor(200 + 40 * pulse), Math.floor(90 + 80 * pulse)))
+      if (this.avatarTimer <= 0) {
+        this.isAvatar = false
+        this.sprite.clearTint()
+        if (this.scene.showMessage) this.scene.showMessage('The divine fire dims.', 1600)
+      }
+    }
+
+    // Airborne timer feeds the slam arming check; reset on the ground.
+    this._airTime = onGround ? 0 : this._airTime + delta
+
     // Landing detection
     if (onGround && !this.wasOnGround) {
-      if (this.lastFallSpeed > 150) {
+      if (this.isSlamming) {
+        // Slam impact: the scene owns the crater, AOE, and essence so
+        // the world-facing consequences stay out of the input class.
+        this.isSlamming = false
+        this.sprite.rotation = 0
+        if (this.scene.onGodSlam) {
+          this.scene.onGodSlam(this.sprite.x, this.sprite.y, this.lastFallSpeed)
+        }
+      } else if (this.lastFallSpeed > 150) {
         // Calculate shake amount based on fall severity (maxes out around 0.3)
         const traumaAmount = Math.min(0.3, (this.lastFallSpeed - 150) / 1000)
         if (this.scene.addTrauma) this.scene.addTrauma(traumaAmount)
@@ -152,7 +201,10 @@ export default class God {
     this.checkLiquid(worldGrid)
 
     // -- Horizontal movement --
-    const speed = this.isInLiquid ? GOD_SPEED * 0.6 : GOD_SPEED
+    // Avatar form grants a 20% stride bonus; divinity should be felt
+    // in the legs as well as the spell bar.
+    const avatarMul = this.isAvatar ? 1.2 : 1.0
+    const speed = (this.isInLiquid ? GOD_SPEED * 0.6 : GOD_SPEED) * avatarMul
     const effectiveSpeed = onGround ? speed : speed * AIR_CONTROL
     let moving = false
     let movingLeft = this.cursors.left.isDown || this.wasd.left.isDown
@@ -202,9 +254,49 @@ export default class God {
       body.setGravityY(GRAVITY * 0.4) // reduced gravity while holding space
     }
 
+    // -- Ground slam --
+    // Down while properly airborne arms a meteor dive. The minimum air
+    // time stops a slam firing from a kerb-height hop; liquid is
+    // excluded because down means swim there.
+    const wantsDown = this.cursors.down.isDown || this.wasd.down.isDown
+    if (wantsDown && !onGround && !this.isInLiquid && this._airTime > SLAM_MIN_AIR_TIME) {
+      if (!this.isSlamming) {
+        this.isSlamming = true
+        body.setMaxVelocityY(SLAM_DIVE_SPEED + 100)
+        if (this.scene.addTrauma) this.scene.addTrauma(0.08)
+      }
+    }
+    if (this.isSlamming) {
+      if (onGround || this.isInLiquid) {
+        // Liquid landing or a same-frame ground touch: stand down quietly.
+        this.isSlamming = false
+        body.setMaxVelocityY(500)
+        this.sprite.rotation = 0
+      } else {
+        body.setVelocityY(SLAM_DIVE_SPEED)
+        body.setVelocityX(body.velocity.x * 0.92)
+        // Meteor spin + trail so the dive reads as an attack
+        this.sprite.rotation += 0.35 * (this.facingRight ? 1 : -1)
+        if (Math.random() < 0.6) {
+          const p = this.scene.add.circle(
+            this.sprite.x + (Math.random() - 0.5) * 8,
+            this.sprite.y - 14,
+            1.5 + Math.random() * 1.5, 0xffcc66, 0.85,
+          ).setDepth(9).setBlendMode(Phaser.BlendModes.ADD)
+          this.scene.tweens.add({
+            targets: p, y: p.y - 14 - Math.random() * 10, alpha: 0, scale: 0.2,
+            duration: 280 + Math.random() * 160,
+            onComplete: () => p.destroy(),
+          })
+        }
+      }
+    } else if (body.maxVelocity.y !== 500) {
+      body.setMaxVelocityY(500)
+    }
+
     // -- Directional digging --
     // Down digs downward or in movement direction
-    const wantsDigDown = this.cursors.down.isDown || this.wasd.down.isDown
+    const wantsDigDown = wantsDown
     if (wantsDigDown && time - this.lastDigTime > DIG_RATE) {
       this.lastDigTime = time
       let dug = false
@@ -329,7 +421,20 @@ export default class God {
         worldGrid.layer.putTileAt(-1, tileX + pad - worldGrid.width, tileY)
       }
     }
-    this.spawnDebris(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2)
+    const px = tileX * TILE_SIZE + TILE_SIZE / 2
+    const py = tileY * TILE_SIZE + TILE_SIZE / 2
+    this.spawnDebris(px, py)
+
+    // Essence pockets: digging occasionally cracks open a mote of
+    // divine essence, more often the deeper the god goes. This gives
+    // tunnelling its own moment-to-moment reward instead of being a
+    // means to an end, and quietly pulls players toward the depths
+    // where the tablets live.
+    if (this.scene.spawnEssence) {
+      const depthFrac = tileY / worldGrid.height
+      const chance = 0.035 + depthFrac * 0.10
+      if (Math.random() < chance) this.scene.spawnEssence(px, py, 1)
+    }
     return true
   }
 
@@ -360,6 +465,10 @@ export default class God {
     if (this.isGhost) return
     this.isGhost = true
     this._ghostTimer = 0
+    // Death strips avatar form and any armed slam; spirits carry no fire.
+    this.isAvatar = false
+    this.avatarTimer = 0
+    this.isSlamming = false
     if (this.sprite) {
       this.sprite.setAlpha(0.45)
       this.sprite.setTint(0xdde8ff)
@@ -441,6 +550,9 @@ export default class God {
     if (this.isGhost) return
     if (time - this._lastDamageTime < 500) return
     this._lastDamageTime = time
+    // Avatar form shrugs off half of all incoming damage; the window
+    // is short, so the player should feel briefly untouchable.
+    if (this.isAvatar) amount *= 0.5
     this.hp = Math.max(0, this.hp - amount)
     if (this.sprite) {
       this.sprite.setTint(0xff5555)

@@ -2,7 +2,7 @@ import Phaser from 'phaser'
 import { WORLD_WIDTH, WORLD_HEIGHT, TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, TERRAIN, ELEMENTS, ELEMENT_PAIRS } from '../core/Constants.js'
 import { generateWorld, findFlatSurface, findCaveSurface, findTabletLocation } from '../world/WorldGenerator.js'
 import { createTilesetTexture, createTilemap, setupCollision, WRAP_PAD } from '../world/WorldRenderer.js'
-import { buildPalette, SOLID_TILES } from '../world/TileTypes.js'
+import { buildPalette, SOLID_TILES, TILES } from '../world/TileTypes.js'
 import God from '../god/God.js'
 import Village from '../civilisation/Village.js'
 import Bodyguard from '../civilisation/Bodyguard.js'
@@ -484,6 +484,18 @@ export default class WorldScene extends Phaser.Scene {
 
     // Erosion timer: slow geological process
     this._lastErosionTime = 0
+
+    // ── Fun-pass state ──
+    // Essence motes are the reward currency for every divine action:
+    // digging, kills, slams, tablets. They home to the god and pay out
+    // mana and wrath on contact. The combo counter chains kills made
+    // within a short window into escalating payouts; the floating-text
+    // budget caps simultaneous popups so a massacre doesn't become a
+    // wall of text.
+    this._essenceMotes = []
+    this._comboCount = 0
+    this._comboTimer = 0
+    this._floatingTexts = 0
   }
 
   // Walk down from a starting tile until we hit solid ground.
@@ -630,7 +642,7 @@ export default class WorldScene extends Phaser.Scene {
 
     // Hint text
     this.hintText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 30,
-      'Explore the world. Dig deep to find ancient tablets.', {
+      'Dig deep for tablets. Press down in the air to slam. Gold essence feeds your wrath.', {
       fontFamily: 'Georgia, serif',
       fontSize: '12px',
       color: '#666666',
@@ -732,8 +744,25 @@ export default class WorldScene extends Phaser.Scene {
       this.hintText.setAlpha(1)
       this.tweens.killTweensOf(this.hintText)
 
-      this.addJuice('light')
-      if (this.ambience) this.ambience.playMagic()
+      // Tablets are the rarest pickups in the game; the moment should
+      // land like one. Epic juice (slowmo + punch-in + impact frame),
+      // a full mana refund, a wrath surge, and a golden shockwave.
+      this.addJuice('epic')
+      if (this.god) {
+        this.god.mana = this.god.maxMana
+        this.god.wrath = Math.min(this.god.maxWrath, this.god.wrath + 30)
+      }
+      if (this.ambience) {
+        this.ambience.playMagic()
+        if (this.ambience.playGong) this.ambience.playGong()
+      }
+      this.spawnEssence(tablet.worldX, tablet.worldY, 5)
+      const ring = this.add.circle(tablet.worldX, tablet.worldY, 6)
+        .setStrokeStyle(3, 0xffd166, 1).setDepth(24).setBlendMode(Phaser.BlendModes.ADD)
+      this.tweens.add({
+        targets: ring, radius: 110, alpha: 0, duration: 800, ease: 'Quad.easeOut',
+        onComplete: () => ring.destroy(),
+      })
 
       // Sparkle burst at the pickup location: a small ring of additive
       // motes drifting outward and fading. Pure feedback, no logic.
@@ -1141,6 +1170,9 @@ export default class WorldScene extends Phaser.Scene {
         const dx = u.sprite.x - gx
         const dy = u.sprite.y - gy
         if (dx * dx + dy * dy < touchR * touchR) {
+          this.showFloatingText(u.sprite.x, u.sprite.y - 16, 'SMITE', {
+            size: 12, colour: '#ffd166', bold: true, rise: 24,
+          })
           u.takeDamage(9999, null) // instant kill
         }
       }
@@ -1164,6 +1196,14 @@ export default class WorldScene extends Phaser.Scene {
     this._tickProjectiles(dilatedDelta)
     this._tickZones(dilatedDelta)
     this._tickBuffs(dilatedDelta)
+
+    // Essence motes home to the god; the combo chain cools off when
+    // the player stops killing.
+    this._tickEssence(dilatedDelta)
+    if (this._comboTimer > 0) {
+      this._comboTimer -= dilatedDelta
+      if (this._comboTimer <= 0) this._comboCount = 0
+    }
 
     // Spells: tick cooldowns + refresh HUD
     if (this.spellBook) {
@@ -1819,6 +1859,7 @@ export default class WorldScene extends Phaser.Scene {
       params: { ...this.params },
       godHp: this.god.hp,
       godMana: this.god.mana,
+      godWrath: this.god.wrath,
       godHighestTablet: this.god.highestTablet,
     }
 
@@ -1838,6 +1879,7 @@ export default class WorldScene extends Phaser.Scene {
       godState: {
         hp: this.god.hp,
         mana: this.god.mana,
+        wrath: this.god.wrath,
         highestTablet: this.god.highestTablet,
       },
       warriorCount: Math.max(6, warriorCount),
@@ -1899,6 +1941,7 @@ export default class WorldScene extends Phaser.Scene {
       godState: {
         hp: snap.godHp,
         mana: snap.godMana,
+        wrath: snap.godWrath,
         highestTablet: snap.godHighestTablet + godStatues,
       },
       godStatueInventory: godStatues,
@@ -1915,6 +1958,7 @@ export default class WorldScene extends Phaser.Scene {
       // planes is dramatic enough without dumping the player into a
       // raid with an empty spell bar.
       this.god.mana = this.god.maxMana
+      this.god.wrath = godState.wrath || 0
       this.god.highestTablet = godState.highestTablet
       this.tabletHUD?.setText(`Tablets: ${this.god.highestTablet}`)
     }
@@ -2211,6 +2255,282 @@ export default class WorldScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ONE', () => this.spellBook?.select(0))
     this.input.keyboard.on('keydown-TWO', () => this.spellBook?.select(1))
     this.input.keyboard.on('keydown-THREE', () => this.spellBook?.select(2))
+
+    // Q unleashes avatar form once the wrath meter is full
+    this.input.keyboard.on('keydown-Q', () => this._activateAvatar())
+  }
+
+  // ── Divine essence, wrath, and combo systems ─────────────
+
+  // Spawn essence motes at a world position. They scatter briefly,
+  // then home to the god and pay out on contact. All the game's
+  // rewarding actions route through here so the player learns one
+  // visual grammar: gold sparks mean you did something divine.
+  spawnEssence(x, y, count = 1, value = 1) {
+    if (!this._essenceMotes) this._essenceMotes = []
+    // Hard cap: beyond it, pay out instantly rather than spawning more
+    // sprites. The player still gets the reward; the GPU gets a break.
+    const CAP = 120
+    for (let i = 0; i < count; i++) {
+      if (this._essenceMotes.length >= CAP) {
+        this._payEssence(value)
+        continue
+      }
+      const angle = Math.random() * Math.PI * 2
+      const burst = 40 + Math.random() * 70
+      const sprite = this.add.circle(x, y, 2 + Math.random() * 1.4, 0xffd166, 0.95)
+        .setDepth(23).setBlendMode(Phaser.BlendModes.ADD)
+      this._essenceMotes.push({
+        sprite,
+        vx: Math.cos(angle) * burst,
+        vy: Math.sin(angle) * burst - 30,
+        age: 0,
+        value,
+      })
+    }
+  }
+
+  // Per-frame essence tick: brief scatter, then accelerating homing.
+  // Plain kinematics rather than tweens because the target moves.
+  _tickEssence(delta) {
+    if (!this._essenceMotes?.length || !this.god?.sprite) return
+    const dt = delta / 1000
+    const gx = this.god.sprite.x
+    const gy = this.god.sprite.y - 10
+    for (let i = this._essenceMotes.length - 1; i >= 0; i--) {
+      const m = this._essenceMotes[i]
+      m.age += delta
+      if (m.age < 260) {
+        // Scatter phase: drift outward and slow down
+        m.vx *= 0.92
+        m.vy *= 0.92
+      } else {
+        // Homing phase: accelerate toward the god, capped so the
+        // vacuum reads as eager rather than instant
+        const dx = gx - m.sprite.x
+        const dy = gy - m.sprite.y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const accel = 1600
+        m.vx += (dx / dist) * accel * dt
+        m.vy += (dy / dist) * accel * dt
+        const sp = Math.sqrt(m.vx * m.vx + m.vy * m.vy)
+        const maxSp = 720
+        if (sp > maxSp) { m.vx = (m.vx / sp) * maxSp; m.vy = (m.vy / sp) * maxSp }
+      }
+      m.sprite.x += m.vx * dt
+      m.sprite.y += m.vy * dt
+
+      const cdx = gx - m.sprite.x
+      const cdy = gy - m.sprite.y
+      const collected = cdx * cdx + cdy * cdy < 16 * 16
+      const expired = m.age > 6000
+      if (collected || expired) {
+        if (collected) this._payEssence(m.value)
+        m.sprite.destroy()
+        this._essenceMotes.splice(i, 1)
+      }
+    }
+  }
+
+  // Essence payout: mana refund plus wrath charge. The shimmer cue is
+  // throttled so a vacuumed cluster chimes once, not thirty times.
+  _payEssence(value = 1) {
+    const god = this.god
+    if (!god) return
+    god.mana = Math.min(god.maxMana, god.mana + 0.25 * value)
+    const wasFull = god.wrath >= god.maxWrath
+    god.wrath = Math.min(god.maxWrath, god.wrath + 2.5 * value)
+    if (!wasFull && god.wrath >= god.maxWrath) {
+      this.showMessage('Divine wrath at its peak. Press Q to become the storm.', 2600)
+      if (this.ambience?.playGong) this.ambience.playGong()
+    }
+    const now = this.time.now
+    if (this.ambience?.playTabletShimmer && now - (this._lastEssenceChime || 0) > 400) {
+      this._lastEssenceChime = now
+      this.ambience.playTabletShimmer()
+    }
+  }
+
+  // Avatar form: spend a full wrath meter for ten seconds of free,
+  // rapid casting and half damage. This is the crescendo the whole
+  // essence economy builds toward.
+  _activateAvatar() {
+    const god = this.god
+    if (!god || god.isGhost || god.isAvatar) return
+    if (god.wrath < god.maxWrath) {
+      this.showMessage('Wrath still gathers. Dig, fight, conquer.', 1400)
+      return
+    }
+    god.wrath = 0
+    god.isAvatar = true
+    god.avatarTimer = 10000
+    this.addJuice('epic')
+    this.showMessage('AVATAR FORM. Your spells cost nothing.', 2600)
+    if (this.ambience?.playGong) this.ambience.playGong()
+    if (this.ambience?.playMagic) this.ambience.playMagic()
+    // Golden shockwave ring from the god
+    const ring = this.add.circle(god.sprite.x, god.sprite.y - 10, 8)
+      .setStrokeStyle(3, 0xffd166, 1).setDepth(24).setBlendMode(Phaser.BlendModes.ADD)
+    this.tweens.add({
+      targets: ring, radius: 90, alpha: 0, duration: 700, ease: 'Quad.easeOut',
+      onComplete: () => ring.destroy(),
+    })
+  }
+
+  // Floating world-space text with a strict concurrency budget.
+  showFloatingText(x, y, text, options = {}) {
+    if ((this._floatingTexts || 0) >= 40) return
+    this._floatingTexts = (this._floatingTexts || 0) + 1
+    const t = this.add.text(x, y, text, {
+      fontFamily: 'Georgia, serif',
+      fontSize: `${options.size || 11}px`,
+      color: options.colour || '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 2,
+      fontStyle: options.bold ? 'bold' : 'normal',
+    }).setOrigin(0.5).setDepth(35)
+    this.tweens.add({
+      targets: t,
+      y: y - (options.rise || 22),
+      alpha: 0,
+      duration: options.duration || 750,
+      ease: 'Quad.easeOut',
+      onComplete: () => { t.destroy(); this._floatingTexts-- },
+    })
+  }
+
+  // Damage numbers for player-caused hits. Crits arrive pre-flagged
+  // from the damage roll so the popup matches what was dealt.
+  showDamageNumber(x, y, amount, crit = false) {
+    const shown = Math.round(amount)
+    if (shown < 1) return
+    this.showFloatingText(x + (Math.random() - 0.5) * 8, y, crit ? `${shown}!` : `${shown}`, {
+      size: crit ? 14 : 10,
+      colour: crit ? '#ffd166' : '#ffeecc',
+      bold: crit,
+      rise: crit ? 30 : 20,
+    })
+  }
+
+  // Kill hook called by CombatUnit._die and EnemyGod._die. Pays out
+  // essence and advances the combo chain. Only enemy deaths reward the
+  // player; losing your own warriors should never feel like a payday.
+  onUnitKilled(unit) {
+    if (!unit || unit.team === 'home') return
+    const x = unit.sprite?.x ?? this.god?.sprite?.x
+    const y = (unit.sprite?.y ?? 0) - 10
+
+    // Combo chain: kills within 2.5 s of each other multiply payouts.
+    this._comboCount = (this._comboCount || 0) + 1
+    this._comboTimer = 2500
+    const combo = this._comboCount
+
+    const baseMotes = 1 + Math.floor((unit.stage || 1) / 4)
+    const bonusMotes = combo >= 10 ? 2 : combo >= 5 ? 1 : 0
+    this.spawnEssence(x, y, baseMotes + bonusMotes)
+
+    // Milestone beats: the screen itself celebrates a rampage.
+    if (combo === 3) {
+      this.showFloatingText(x, y - 8, 'x3 FURY', { size: 13, colour: '#ffaa44', bold: true, rise: 26 })
+    } else if (combo === 5) {
+      this.showFloatingText(x, y - 8, 'x5 DIVINE WRATH', { size: 15, colour: '#ff8833', bold: true, rise: 30 })
+      this.addJuice('medium')
+    } else if (combo === 10) {
+      this.showFloatingText(x, y - 8, 'x10 GODLIKE', { size: 17, colour: '#ffd166', bold: true, rise: 36 })
+      this.addJuice('heavy')
+      if (this.ambience?.playGong) this.ambience.playGong()
+    } else if (combo === 20) {
+      this.showFloatingText(x, y - 8, 'x20 APOCALYPTIC', { size: 19, colour: '#ff5533', bold: true, rise: 42 })
+      this.addJuice('epic')
+      // A 20-chain hands back a chunk of wrath on top of the motes
+      if (this.god) this.god.wrath = Math.min(this.god.maxWrath, this.god.wrath + 25)
+    }
+  }
+
+  // Ground slam impact. Crater, AOE damage with knockback, dust, and
+  // essence from the shattered tiles. Scales with impact speed so a
+  // sky-high dive lands harder than a rooftop hop.
+  onGodSlam(x, y, fallSpeed) {
+    const power = Math.min(1, Math.max(0.35, fallSpeed / 800))
+    const radiusPx = TILE_SIZE * (3 + power * 3)
+
+    // Crater: carve a shallow bowl beneath the impact point
+    const grid = this.worldGrid?.grid
+    if (grid) {
+      const cx = Math.floor(x / TILE_SIZE)
+      const cy = Math.floor(y / TILE_SIZE)
+      const r = Math.round(2 + power * 2)
+      let shattered = 0
+      for (let dy = -1; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue
+          const tx = ((cx + dx) % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH
+          const ty = cy + dy
+          if (ty < 0 || ty >= WORLD_HEIGHT) continue
+          const idx = ty * WORLD_WIDTH + tx
+          const tile = grid[idx]
+          if (tile === TILES.AIR) continue
+          // Same uncarvable rules as digging: the world keeps its floor
+          if (SOLID_TILES.has(tile) && tile !== TILES.BEDROCK && tile !== TILES.MAGMA_ROCK) {
+            grid[idx] = 0
+            shattered++
+            if (this.worldGrid.layer) {
+              const pad = this.worldGrid.padOffset || 0
+              this.worldGrid.layer.putTileAt(-1, tx + pad, ty)
+            }
+          }
+        }
+      }
+      // Essence proportional to destruction, capped so slam-spam
+      // doesn't out-earn actual combat
+      if (shattered > 0) this.spawnEssence(x, y - 8, Math.min(3, 1 + Math.floor(shattered / 14)))
+    }
+
+    // AOE damage + launch on enemies caught in the shockwave
+    if (this.warDirector?.units) {
+      for (const u of this.warDirector.units) {
+        if (!u.alive || u.team === 'home') continue
+        const dx = u.sprite.x - x
+        const dy = u.sprite.y - y
+        const d2 = dx * dx + dy * dy
+        if (d2 < radiusPx * radiusPx) {
+          const dmg = Math.round(20 + power * 25)
+          u.takeDamage(dmg)
+          this.showDamageNumber(u.sprite.x, u.sprite.y - 10, dmg, false)
+          if (u.sprite?.body) {
+            const dist = Math.sqrt(d2) || 1
+            u.sprite.body.setVelocity((dx / dist) * 260, -220 - power * 120)
+          }
+        }
+      }
+    }
+    if (this.enemyGod?.alive && this.enemyGod.sprite) {
+      const dx = this.enemyGod.sprite.x - x
+      const dy = this.enemyGod.sprite.y - y
+      if (dx * dx + dy * dy < radiusPx * radiusPx) {
+        const dmg = Math.round(15 + power * 20)
+        this.damageEnemyGod(dmg)
+        this.showDamageNumber(this.enemyGod.sprite.x, this.enemyGod.sprite.y - 14, dmg, true)
+      }
+    }
+
+    // Impact feedback: dust ring + camera punch sized to the dive
+    this.addJuice(power > 0.75 ? 'heavy' : 'medium')
+    if (this.ambience?.playDig) this.ambience.playDig()
+    for (let i = 0; i < 12; i++) {
+      const a = Math.PI + (i / 12) * Math.PI // fan upward and outward
+      const sp = 30 + Math.random() * 50 * (1 + power)
+      const dust = this.add.circle(x, y - 2, 1.5 + Math.random() * 2, 0xbbaa88, 0.8).setDepth(12)
+      this.tweens.add({
+        targets: dust,
+        x: x + Math.cos(a) * sp,
+        y: y - 2 + Math.sin(a) * sp * 0.5,
+        alpha: 0, scale: 0.2,
+        duration: 380 + Math.random() * 220,
+        ease: 'Quad.easeOut',
+        onComplete: () => dust.destroy(),
+      })
+    }
   }
 
   // ── Bodyguard dispatch & update ──────────────────────

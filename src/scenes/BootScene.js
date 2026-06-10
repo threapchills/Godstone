@@ -15,6 +15,11 @@ const TIPS = [
   'Defeat invading gods to earn extra knowledge tablets',
   'Raid enemy worlds to earn god statues',
   'God statues unlock civilisation tiers beyond stage 7',
+  'Press down in mid-air to slam the earth like a meteor',
+  'Gold essence flows from digging, kills, and conquest',
+  'Essence refills mana and charges your wrath meter',
+  'Full wrath? Press Q for avatar form: spells cost nothing',
+  'Chain kills quickly to build a combo and earn more essence',
 ]
 
 // Two-phase boot: the first preload pulls in only three tiny images
